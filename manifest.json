@@ -1,0 +1,18 @@
+{
+    "name": "Design System Checker",
+    "id": "design-system-checker",
+    "api": "1.0.0",
+    "main": "dist/code.js",
+    "ui": "dist/ui.html",
+    "editorType": ["figma"],
+    "menu": [
+      {
+        "name": "Check Design System Usage",
+        "command": "check-design-system"
+      },
+      {
+        "name": "Configure Settings",
+        "command": "configure-settings"
+      }
+    ]
+  }
