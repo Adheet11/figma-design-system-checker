@@ -1,53 +1,72 @@
 import { traverseNode, isNodeVisible, getSelectedNodesOrAllNodes, createHighlighter } from './utils';
-import { checkFills, checkStrokes, checkTextStyles, checkEffects, StyleCheckResult as PluginStyleCheckResult, StyleSuggestion as PluginStyleSuggestion } from './checkers/styleChecker';
+import { checkFills, checkStrokes, checkTextStyles, checkEffects } from './checkers/styleChecker';
 import { checkVariables, checkMissingVariables, detectDesignSystemTokens } from './checkers/tokenChecker';
-import { checkComponent, ComponentCheckResult as PluginComponentCheckResult } from './checkers/componentChecker';
+import { checkComponent } from './checkers/componentChecker';
 import { calculateCoverage, createCoverageReport } from './analyzers/coverageCalculator';
 import { detectTeamLibraries, detectLocalStyleLibraries } from './analyzers/libraryDetector';
 import { 
   PluginMessage, 
   CheckResults, 
   Fix, 
-  ComponentCheckResult as UIComponentCheckResult, 
+  ComponentCheckResult,
   StyleCheckResult, 
-  TokenCheckResult, 
   StyleSuggestion,
-  TokenSuggestion
+  TokenSuggestion,
+  ComponentCheckResult as UIComponentCheckResult
 } from '../shared/types';
+import { TokenCheckResult } from '../shared/types/tokens';
+
+// Plugin settings
+const PLUGIN_UI_WIDTH = 500;
+const PLUGIN_UI_HEIGHT = 600;
+const BATCH_SIZE = 100;
 
 // Main plugin function
-figma.showUI(__html__, { width: 500, height: 600 });
+figma.showUI(__html__, { width: PLUGIN_UI_WIDTH, height: PLUGIN_UI_HEIGHT });
 
 // Handle plugin initialization
 figma.ui.onmessage = async (msg: PluginMessage) => {
-  if (msg.type === 'checkDesignSystem') {
-    // Show loading message
-    figma.notify('Analyzing design system usage...', { timeout: 10000 });
-    
-    // Start the analysis
-    await runDesignSystemCheck(msg.payload?.options);
-    
-  } else if (msg.type === 'highlightNode') {
-    const nodeId = msg.payload.nodeId;
-    const node = figma.getNodeById(nodeId) as SceneNode;
-    
-    if (node) {
-      // Select and scroll to the node
-      figma.currentPage.selection = [node];
-      figma.viewport.scrollAndZoomIntoView([node]);
+  try {
+    if (msg.type === 'checkDesignSystem') {
+      // Show loading message
+      figma.notify('Analyzing design system usage...', { timeout: 10000 });
+      
+      // Start the analysis
+      await runDesignSystemCheck(msg.payload?.options);
+      
+    } else if (msg.type === 'highlightNode') {
+      const nodeId = msg.payload.nodeId;
+      const node = figma.getNodeById(nodeId) as SceneNode;
+      
+      if (node) {
+        // Select and scroll to the node
+        figma.currentPage.selection = [node];
+        figma.viewport.scrollAndZoomIntoView([node]);
+      }
+      
+    } else if (msg.type === 'applyFix') {
+      await applyFix(msg.payload.fix);
+      
+      // Re-run check after applying a fix
+      await runDesignSystemCheck();
+      
+    } else if (msg.type === 'applyBatchFixes') {
+      await applyBatchFixes(msg.payload.fixes);
+      
+    } else if (msg.type === 'exportReport') {
+      exportCoverageReport(msg.payload.metrics);
+      
+    } else if (msg.type === 'close') {
+      figma.closePlugin();
     }
-    
-  } else if (msg.type === 'applyFix') {
-    await applyFix(msg.payload.fix);
-    
-    // Re-run check after applying a fix
-    await runDesignSystemCheck();
-    
-  } else if (msg.type === 'exportReport') {
-    exportCoverageReport(msg.payload.metrics);
-    
-  } else if (msg.type === 'close') {
-    figma.closePlugin();
+  } catch (error: any) {
+    console.error("Error handling message:", error);
+    figma.notify("An unexpected error occurred", { error: true });
+    // Send error to UI for display
+    figma.ui.postMessage({
+      type: "error",
+      payload: { message: error.message || "Unknown error" }
+    });
   }
 };
 
@@ -57,6 +76,9 @@ async function runDesignSystemCheck(options?: any): Promise<void> {
     // Get selected nodes or all nodes if nothing is selected
     const nodes = getSelectedNodesOrAllNodes();
     
+    // Show progress notification
+    figma.notify('Analyzing design system usage...', { timeout: 10000 });
+    
     // Detect design system libraries
     const teamLibraries = await detectTeamLibraries();
     const localLibraries = detectLocalStyleLibraries();
@@ -65,14 +87,27 @@ async function runDesignSystemCheck(options?: any): Promise<void> {
     // Get design system tokens
     const designTokens = await detectDesignSystemTokens();
     
+    // For large files, process in batches
+    let processedNodes = 0;
+    let totalNodes = 0;
+    
+    // Count total nodes first
+    for (const node of nodes) {
+      totalNodes += countNodes(node);
+    }
+    
     // Store all results
-    const componentResults: PluginComponentCheckResult[] = [];
-    const styleResults: PluginStyleCheckResult[] = [];
+    const componentResults: ComponentCheckResult[] = [];
+    const styleResults: StyleCheckResult[] = [];
     const tokenResults: TokenCheckResult[] = [];
     
-    // Process all nodes
+    // Process each node and its children in batches
     for (const node of nodes) {
-      processNode(node, componentResults, styleResults, tokenResults, designTokens);
+      await processBatches(node, componentResults, styleResults, tokenResults, designTokens, BATCH_SIZE, (processed) => {
+        processedNodes += processed;
+        // Update progress
+        figma.notify(`Analyzing design system usage: ${Math.round((processedNodes / totalNodes) * 100)}%`, { timeout: 10000 });
+      });
     }
     
     // Convert results to UI format
@@ -124,44 +159,134 @@ async function runDesignSystemCheck(options?: any): Promise<void> {
   }
 }
 
+// Count the total number of nodes in a node and its children
+function countNodes(node: SceneNode): number {
+  let count = 1; // Count this node
+  
+  // If node has children, count them too
+  if ('children' in node) {
+    for (const child of node.children) {
+      count += countNodes(child);
+    }
+  }
+  
+  return count;
+}
+
+// Process nodes in batches to avoid UI freezing
+async function processBatches(
+  node: SceneNode, 
+  componentResults: ComponentCheckResult[], 
+  styleResults: StyleCheckResult[], 
+  tokenResults: TokenCheckResult[],
+  designTokens: any,
+  batchSize: number,
+  progressCallback: (processed: number) => void
+): Promise<void> {
+  let nodesToProcess: SceneNode[] = [node];
+  let processedInBatch = 0;
+  let totalProcessed = 0;
+  
+  while (nodesToProcess.length > 0) {
+    const currentNode = nodesToProcess.shift()!;
+    
+    // Process the current node
+    await processNode(currentNode, componentResults, styleResults, tokenResults, designTokens);
+    processedInBatch++;
+    totalProcessed++;
+    
+    // If node has children, add them to the list
+    if ('children' in currentNode) {
+      nodesToProcess = [...nodesToProcess, ...currentNode.children];
+    }
+    
+    // If we've processed enough nodes in this batch, yield to the UI
+    if (processedInBatch >= batchSize) {
+      progressCallback(processedInBatch);
+      processedInBatch = 0;
+      // Yield to UI thread
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+  
+  // Report any remaining processed nodes
+  if (processedInBatch > 0) {
+    progressCallback(processedInBatch);
+  }
+}
+
 // Process a single node and its children
 function processNode(
   node: SceneNode, 
-  componentResults: PluginComponentCheckResult[], 
-  styleResults: PluginStyleCheckResult[],
+  componentResults: ComponentCheckResult[], 
+  styleResults: StyleCheckResult[],
   tokenResults: TokenCheckResult[],
   designTokens: any
 ): void {
-  // Skip processing if node is not visible
-  if (!isNodeVisible(node)) {
-    return;
-  }
-  
-  // Check component usage
-  if (node.type === 'INSTANCE') {
-    const componentChecks = checkComponent(node);
-    componentResults.push(...componentChecks);
-  }
-  
-  // Check style usage
-  const fillChecks = checkFills(node);
-  const strokeChecks = checkStrokes(node);
-  const textChecks = checkTextStyles(node);
-  const effectChecks = checkEffects(node);
-  
-  styleResults.push(...fillChecks, ...strokeChecks, ...textChecks, ...effectChecks);
-  
-  // Check variable/token usage
-  const variableChecks = checkVariables(node, designTokens);
-  const missingVariableChecks = checkMissingVariables(node, designTokens);
-  
-  tokenResults.push(...variableChecks, ...missingVariableChecks);
-  
-  // Recursively process children
-  if ('children' in node) {
-    for (const child of node.children) {
-      processNode(child as SceneNode, componentResults, styleResults, tokenResults, designTokens);
+  try {
+    // Skip processing if node is not visible
+    if (!isNodeVisible(node)) {
+      return;
     }
+    
+    // Check component usage
+    if (node.type === 'INSTANCE') {
+      const componentChecks = checkComponent(node);
+      componentResults.push(...componentChecks);
+    }
+    
+    // Check style usage
+    try {
+      const fillChecks = checkFills(node);
+      styleResults.push(...fillChecks);
+    } catch (error) {
+      console.warn(`Error checking fills for ${node.name}:`, error);
+    }
+    
+    try {
+      const strokeChecks = checkStrokes(node);
+      styleResults.push(...strokeChecks);
+    } catch (error) {
+      console.warn(`Error checking strokes for ${node.name}:`, error);
+    }
+    
+    try {
+      const textChecks = checkTextStyles(node);
+      styleResults.push(...textChecks);
+    } catch (error) {
+      console.warn(`Error checking text styles for ${node.name}:`, error);
+    }
+    
+    try {
+      const effectChecks = checkEffects(node);
+      styleResults.push(...effectChecks);
+    } catch (error) {
+      console.warn(`Error checking effects for ${node.name}:`, error);
+    }
+    
+    // Check variable/token usage
+    try {
+      const variableChecks = checkVariables(node, designTokens);
+      tokenResults.push(...variableChecks);
+    } catch (error) {
+      console.warn(`Error checking variables for ${node.name}:`, error);
+    }
+    
+    try {
+      const missingVariableChecks = checkMissingVariables(node, designTokens);
+      tokenResults.push(...missingVariableChecks);
+    } catch (error) {
+      console.warn(`Error checking missing variables for ${node.name}:`, error);
+    }
+    
+    // Recursively process children
+    if ('children' in node) {
+      for (const child of node.children) {
+        processNode(child as SceneNode, componentResults, styleResults, tokenResults, designTokens);
+      }
+    }
+  } catch (error) {
+    console.warn(`Error processing node ${node.name}:`, error);
   }
 }
 
@@ -403,8 +528,8 @@ async function initPlugin(): Promise<void> {
 // Start plugin
 initPlugin();
 
-// Convert internal plugin ComponentCheckResult to the format expected by the UI
-function convertComponentResults(results: PluginComponentCheckResult[]): UIComponentCheckResult[] {
+// Convert component results to UI format
+function convertComponentResults(results: ComponentCheckResult[]): UIComponentCheckResult[] {
   return results.map(result => ({
     node: {
       id: result.node.id,
@@ -420,22 +545,68 @@ function convertComponentResults(results: PluginComponentCheckResult[]): UICompo
   }));
 }
 
-// Convert plugin StyleCheckResult to UI format
-function convertStyleResults(results: PluginStyleCheckResult[]): StyleCheckResult[] {
-  return results.map(result => ({
-    node: {
-      id: result.node.id,
-      name: result.node.name,
-      type: result.node.type
-    },
-    type: result.type,
-    message: result.message,
-    value: result.value,
-    suggestions: result.suggestions?.map(suggestion => ({
-      name: suggestion.name,
-      id: suggestion.id,
-      value: suggestion.value,
-      source: suggestion.source
-    }))
-  }));
+// Convert plugin results to UI results
+function convertStyleResults(results: StyleCheckResult[]): StyleCheckResult[] {
+  return results.map(result => {
+    return {
+      node: {
+        id: result.node.id,
+        name: result.node.name,
+        type: result.node.type
+      },
+      type: result.type,
+      message: result.message,
+      value: result.value,
+      suggestions: result.suggestions?.map((suggestion: StyleSuggestion) => ({
+        name: suggestion.name,
+        id: suggestion.id,
+        value: suggestion.value,
+        source: suggestion.source
+      }))
+    };
+  });
+}
+
+// Batch fix implementation
+async function applyBatchFixes(fixes: Fix[]): Promise<void> {
+  // Show progress notification
+  figma.notify(`Applying ${fixes.length} fixes...`, { timeout: 10000 });
+  
+  let successCount = 0;
+  let failCount = 0;
+  
+  // Process fixes in smaller batches to avoid UI freezing
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < fixes.length; i += BATCH_SIZE) {
+    const batch = fixes.slice(i, i + BATCH_SIZE);
+    
+    for (const fix of batch) {
+      try {
+        await applyFix(fix);
+        successCount++;
+      } catch (error) {
+        console.error(`Error applying fix ${i}:`, error);
+        failCount++;
+      }
+    }
+    
+    // Update progress
+    figma.notify(`Applied ${i + batch.length} of ${fixes.length} fixes...`, { timeout: 10000 });
+    
+    // Allow UI to update
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  // Final notification
+  figma.notify(`Applied ${successCount} fixes successfully. ${failCount} fixes failed.`);
+  
+  // Send summary to UI
+  figma.ui.postMessage({
+    type: 'batchFixComplete',
+    payload: {
+      totalFixes: fixes.length,
+      successCount,
+      failCount
+    }
+  });
 }

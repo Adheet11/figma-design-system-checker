@@ -1,72 +1,68 @@
 import { colorToHex, colorsAreEqual, findClosestColor } from '../utils';
-
-// Interface for style checking results
-export interface StyleCheckResult {
-  node: SceneNode;
-  type: string; // 'fill', 'stroke', 'effect', 'text'
-  message: string;
-  value: string;
-  suggestions?: StyleSuggestion[];
-}
-
-// Interface for style suggestions
-export interface StyleSuggestion {
-  name: string;
-  id: string;
-  value: string;
-  source: string; // 'Local', 'Remote', 'Library'
-}
+import { StyleCheckResult, StyleSuggestion } from '../../shared/types';
 
 // Check if a node's fill is using a style
 export function checkFills(node: SceneNode): StyleCheckResult[] {
   const results: StyleCheckResult[] = [];
   
-  // Skip if node doesn't have fills
-  if (!('fills' in node) || !node.fills) {
+  // Skip nodes without fills
+  if (!('fills' in node) || typeof node.fills === 'symbol') {
     return results;
   }
   
-  // Skip if node is using mixed fills (which can be a legitimate use case)
-  if (typeof node.fills === 'symbol') {
+  // If fills is empty or not visible, skip
+  if (!node.fills || node.fills.length === 0 || !node.visible) {
     return results;
   }
   
-  // Check if the node has a fill style
-  if ('fillStyleId' in node && !node.fillStyleId) {
-    const fills = node.fills as Paint[];
-    
-    // Skip if there are no visible fills
-    if (fills.length === 0 || !fills.some(fill => fill.visible !== false)) {
-      return results;
-    }
-    
-    // Check each fill
-    for (const fill of fills) {
-      if (fill.visible === false) continue;
-      
-      if (fill.type === 'SOLID') {
-        // Convert RGB to RGBA
-        const fillRgba: RGBA = { ...(fill.color as RGB), a: 1 };
-        const fillColor = colorToHex(fillRgba);
+  // Get all visible fills
+  const visibleFills = (node.fills as readonly Paint[]).filter(fill => fill.visible !== false);
+  if (visibleFills.length === 0) {
+    return results;
+  }
+  
+  // Check if there's a fill style applied
+  if (!node.fillStyleId && visibleFills.length > 0) {
+    // Check each fill for potential suggestions
+    for (const fill of visibleFills) {
+      if (fill.type === 'SOLID' && !node.fillStyleId) {
+        // Convert color to hex
+        const rgbColor = fill.color as RGB;
+        const hexColor = colorToHex({ r: rgbColor.r, g: rgbColor.g, b: rgbColor.b, a: 1 });
         
-        // Find local styles that match this fill
-        const suggestions = findMatchingFillStyles(fill);
-        
+        // Create result with suggestion
         results.push({
-          node,
+          node: {
+            id: node.id,
+            name: node.name,
+            type: node.type
+          },
           type: 'fill',
-          message: 'Missing fill style',
-          value: fillColor,
-          suggestions
-        });
-      } else if (fill.type.includes('GRADIENT')) {
-        results.push({
-          node,
-          type: 'fill',
-          message: 'Missing gradient fill style',
-          value: `Gradient (${fill.type})`,
+          message: 'Node has fill without a style',
+          value: hexColor,
+          suggestions: []  // Suggestions will be added later
         });
       }
+    }
+  }
+  
+  // Add check for mixed fills that should be consistent
+  if ('fills' in node && typeof node.fills !== 'symbol' && node.fills.length > 1) {
+    // Check if multiple fills of the same type are used without a style
+    const solidFills = (node.fills as readonly Paint[]).filter(fill => fill.type === 'SOLID' && fill.visible !== false);
+    
+    if (solidFills.length > 1 && !node.fillStyleId) {
+      results.push({
+        node: {
+          id: node.id,
+          name: node.name,
+          type: node.type
+        },
+        type: 'fill',
+        message: 'Multiple solid fills without a style',
+        value: `${solidFills.length} solid fills`,
+        suggestions: []  // Suggestions will be added later
+      });
     }
   }
   
@@ -142,7 +138,11 @@ export function checkStrokes(node: SceneNode): StyleCheckResult[] {
         const suggestions = findMatchingFillStyles(stroke);
         
         results.push({
-          node,
+          node: {
+            id: node.id,
+            name: node.name,
+            type: node.type
+          },
           type: 'stroke',
           message: 'Missing stroke style',
           value: strokeColor,
@@ -175,7 +175,11 @@ export function checkTextStyles(node: SceneNode): StyleCheckResult[] {
     const suggestions = findMatchingTextStyles(node);
     
     results.push({
-      node,
+      node: {
+        id: node.id,
+        name: node.name,
+        type: node.type
+      },
       type: 'text',
       message: 'Missing text style',
       value: textValue,
@@ -325,7 +329,11 @@ function checkEffectStyles(node: SceneNode, effects: Effect[], results: StyleChe
   const suggestions = findMatchingEffectStyles(effects);
   
   results.push({
-    node,
+    node: {
+      id: node.id,
+      name: node.name,
+      type: node.type
+    },
     type: 'effect',
     message: 'Missing effect style',
     value: effectValue,
@@ -337,4 +345,98 @@ function getEffectDescription(effects: Effect[]): string {
   // Implement the logic to create a readable description of the effects
   // This is a placeholder and should be replaced with the actual implementation
   return effects.map(effect => effect.type).join(', ');
+}
+
+// Add function to check style consistency
+export function checkStyleConsistency(node: SceneNode): StyleCheckResult[] {
+  const results: StyleCheckResult[] = [];
+  
+  // Check for text styles used inappropriately based on context
+  if (node.type === 'TEXT' && node.textStyleId) {
+    const textStyle = figma.getStyleById(node.textStyleId as string);
+    if (textStyle) {
+      // Check if heading style is used for long text
+      if (textStyle.name.includes('Heading') && node.characters.length > 100) {
+        results.push({
+          node: {
+            id: node.id,
+            name: node.name,
+            type: node.type
+          },
+          type: 'text',
+          message: 'Heading style used for long text block',
+          value: textStyle.name,
+          suggestions: []  // Could suggest body text styles
+        });
+      }
+      
+      // Check if body style is used for very short text
+      if (textStyle.name.includes('Body') && node.characters.length < 5) {
+        results.push({
+          node: {
+            id: node.id,
+            name: node.name,
+            type: node.type
+          },
+          type: 'text',
+          message: 'Body style used for very short text',
+          value: textStyle.name,
+          suggestions: []  // Could suggest label styles
+        });
+      }
+    }
+  }
+  
+  // Check for mixed style usage within a frame
+  if ('children' in node && node.type === 'FRAME') {
+    checkMixedStylesInFrame(node as FrameNode, results);
+  }
+  
+  return results;
+}
+
+// Helper function to check for mixed styles in a frame
+function checkMixedStylesInFrame(frame: FrameNode, results: StyleCheckResult[]): void {
+  // Check for mixed text styles in a paragraph
+  const textNodes = frame.findAll(node => node.type === 'TEXT') as TextNode[];
+  if (textNodes.length > 1) {
+    const textStyles = new Set(textNodes.map(node => node.textStyleId).filter(Boolean));
+    if (textStyles.size > 2) {
+      results.push({
+        node: {
+          id: frame.id,
+          name: frame.name,
+          type: frame.type
+        },
+        type: 'mixed-styles',
+        message: 'Frame contains mixed text styles',
+        value: `${textStyles.size} different text styles`,
+        suggestions: []
+      });
+    }
+  }
+  
+  // Check for mixed fill styles in a component or section
+  const nodesWithFills = frame.findAll(node => 
+    'fills' in node && 
+    (node as any).fills?.length > 0 && 
+    (node as any).fillStyleId
+  ) as SceneNode[];
+  
+  if (nodesWithFills.length > 1) {
+    const fillStyles = new Set(nodesWithFills.map((node: any) => node.fillStyleId).filter(Boolean));
+    if (fillStyles.size > 3) {  // Allow some variation but flag excessive use
+      results.push({
+        node: {
+          id: frame.id,
+          name: frame.name,
+          type: frame.type
+        },
+        type: 'mixed-styles',
+        message: 'Frame contains too many different fill styles',
+        value: `${fillStyles.size} different fill styles`,
+        suggestions: []
+      });
+    }
+  }
 }

@@ -1,6 +1,17 @@
 import './styles/main.css';
 import { CheckResults, PluginMessage, Fix } from '../shared/types';
 
+// Define global window interface for our properties
+declare global {
+  interface Window {
+    currentResults?: {
+      componentResults: any[];
+      styleResults: any[];
+      tokenResults: any[];
+    };
+  }
+}
+
 // DOM Elements
 const tabs = document.querySelectorAll('.tab');
 const tabContents = document.querySelectorAll('.tab-content');
@@ -11,27 +22,148 @@ const exportReportBtn = document.getElementById('exportReportBtn') as HTMLButton
 const loadingState = document.getElementById('loadingState') as HTMLDivElement;
 const emptyState = document.getElementById('emptyState') as HTMLDivElement;
 
+// Add message handler
+window.onmessage = (event) => {
+  const message = event.data.pluginMessage as PluginMessage;
+  
+  if (!message) return;
+  
+  if (message.type === "error") {
+    // Display error in UI
+    showErrorMessage(message.payload.message);
+    return;
+  }
+  
+  if (message.type === "checkResults") {
+    // Hide loading state
+    setLoading(false);
+    
+    // Get results
+    const results = message.payload as CheckResults;
+    
+    // Store results for filtering
+    window.currentResults = {
+      componentResults: results.componentResults,
+      styleResults: results.styleResults,
+      tokenResults: results.tokenResults
+    };
+    
+    // Update metrics
+    updateSummaryMetrics(results.metrics);
+    
+    // Update issue counts
+    updateIssueCounts(
+      results.componentResults.length,
+      results.styleResults.length,
+      results.tokenResults.length
+    );
+    
+    // Update tables
+    updateComponentsTable(results.componentResults);
+    updateStylesTable(results.styleResults);
+    updateVariablesTable(results.tokenResults);
+    
+    // Update library select
+    updateLibrarySelect(results.libraries);
+    
+    // Show summary tab
+    showTab('summary');
+  } else if (message.type === "fixApplied") {
+    // Show notification of successful fix
+    const payload = message.payload;
+    showSuccessMessage(`Fixed ${payload.fixType} on "${payload.nodeName}"`);
+  } else if (message.type === "batchFixComplete") {
+    // Show batch fix results
+    const payload = message.payload;
+    showSuccessMessage(`Applied ${payload.successCount} of ${payload.totalFixes} fixes successfully. ${payload.failCount} fixes failed.`);
+    setLoading(false);
+  } else if (message.type === "exportReportData") {
+    // Create download link for report data
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(message.payload);
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", "design-system-report.json");
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  }
+};
+
+// Add error display function
+function showErrorMessage(message: string) {
+  const errorContainer = document.getElementById('errorContainer');
+  if (errorContainer) {
+    errorContainer.textContent = message;
+    errorContainer.style.display = 'block';
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      errorContainer.style.display = 'none';
+    }, 5000);
+  }
+}
+
+// Add success message function
+function showSuccessMessage(message: string) {
+  const errorContainer = document.getElementById('errorContainer');
+  if (errorContainer) {
+    errorContainer.textContent = message;
+    errorContainer.classList.add('success');
+    errorContainer.style.display = 'block';
+    
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+      errorContainer.style.display = 'none';
+      errorContainer.classList.remove('success');
+    }, 3000);
+  }
+}
+
+// Add loading state function
+function setLoading(isLoading: boolean) {
+  const loadingState = document.getElementById('loadingState');
+  const content = document.getElementById('content');
+  
+  if (loadingState && content) {
+    if (isLoading) {
+      loadingState.style.display = 'flex';
+      content.classList.add('disabled');
+    } else {
+      loadingState.style.display = 'none';
+      content.classList.remove('disabled');
+    }
+  }
+}
+
+// Helper function to show a specific tab
+function showTab(tabName: string) {
+  // Remove active class from all tabs
+  tabs.forEach(t => t.classList.remove('active'));
+  
+  // Add active class to selected tab
+  const selectedTab = document.querySelector(`.tab[data-tab="${tabName}"]`);
+  if (selectedTab) {
+    selectedTab.classList.add('active');
+  }
+  
+  // Hide all tab contents
+  tabContents.forEach(content => {
+    (content as HTMLElement).style.display = 'none';
+  });
+  
+  // Show the selected tab content
+  const tabContent = document.getElementById(`${tabName}Tab`);
+  if (tabContent) {
+    tabContent.style.display = 'block';
+  }
+}
+
 // Tab switching
 tabs.forEach(tab => {
   tab.addEventListener('click', () => {
-    // Remove active class from all tabs
-    tabs.forEach(t => t.classList.remove('active'));
-    
-    // Add active class to clicked tab
-    tab.classList.add('active');
-    
-    // Hide all tab contents
-    tabContents.forEach(content => {
-      (content as HTMLElement).style.display = 'none';
-    });
-    
-    // Show the selected tab content
     const tabName = tab.getAttribute('data-tab');
     if (tabName) {
-      const tabContent = document.getElementById(`${tabName}Tab`);
-      if (tabContent) {
-        tabContent.style.display = 'block';
-      }
+      showTab(tabName);
     }
   });
 });
@@ -39,23 +171,25 @@ tabs.forEach(tab => {
 // Initialize the plugin
 document.addEventListener('DOMContentLoaded', () => {
   // Show loading state initially
-  loadingState.style.display = 'flex';
+  setLoading(true);
   emptyState.style.display = 'none';
   
-  // Hide tab content
-  tabContents.forEach(content => {
-    (content as HTMLElement).style.display = 'none';
-  });
+  // Initialize filter controls
+  initFilterControls();
+  
+  // Store results globally for filtering
+  window.currentResults = {
+    componentResults: [],
+    styleResults: [],
+    tokenResults: []
+  };
 });
 
 // Button event listeners
 runCheckBtn.addEventListener('click', () => {
   // Show loading state
-  loadingState.style.display = 'flex';
+  setLoading(true);
   emptyState.style.display = 'none';
-  tabContents.forEach(content => {
-    (content as HTMLElement).style.display = 'none';
-  });
   
   // Get options from settings
   const options = {
@@ -156,7 +290,96 @@ function updateIssueCounts(componentIssues: number, styleIssues: number, variabl
   setElementText('totalIssues', totalIssues.toString());
 }
 
-// Update components table
+// Update functions for tables using event delegation
+function addTableEventHandlers(tableBody: HTMLElement, results: any[]): void {
+  // Fix issue with the locate buttons where event binding might not persist
+  tableBody.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    
+    // Use event delegation instead of individual event handlers
+    if (target.classList.contains('locate-btn')) {
+      const row = target.closest('.issue-row');
+      if (row) {
+        const nodeId = (row as HTMLElement).dataset.nodeId;
+        if (nodeId) {
+          parent.postMessage({ pluginMessage: { type: 'highlightNode', payload: { nodeId } } }, '*');
+        }
+      }
+    } else if (target.classList.contains('fix-btn')) {
+      handleFixButtonClick(target, results);
+    } else if (target.classList.contains('preview-btn')) {
+      const row = target.closest('.issue-row');
+      if (row) {
+        const nodeId = (row as HTMLElement).dataset.nodeId;
+        if (nodeId) {
+          const result = results.find(r => r.node.id === nodeId);
+          if (result) {
+            showFixPreview(result, getFixType(result));
+          }
+        }
+      }
+    }
+  });
+}
+
+function handleFixButtonClick(target: HTMLElement, results: any[]) {
+  const row = target.closest('.issue-row');
+  if (!row) return;
+  
+  const nodeId = (row as HTMLElement).dataset.nodeId;
+  const fixType = target.dataset.fix;
+  
+  if (!nodeId || !fixType) return;
+  
+  // Find the result for this node
+  const result = results.find(r => r.node.id === nodeId);
+  if (!result) return;
+  
+  // Show preview instead of applying immediately
+  showFixPreview(result, getFixType(result));
+}
+
+function createFixObject(result: any, fixType: string): Fix {
+  // Base fix object
+  const fix: any = {
+    nodeId: result.node.id,
+    type: getFixType(result),
+    fixType: fixType
+  };
+  
+  // Add additional properties based on the type
+  if (fix.type === 'component') {
+    if (fixType === 'swap' && result.mainComponentKey) {
+      fix.componentKey = result.mainComponentKey;
+    }
+  } else if (fix.type === 'style') {
+    fix.styleType = result.type;
+    if (result.suggestions && result.suggestions.length > 0) {
+      fix.style = result.suggestions[0];
+    }
+  } else if (fix.type === 'variable') {
+    fix.property = result.property;
+    if (result.suggestions && result.suggestions.length > 0) {
+      fix.variable = result.suggestions[0];
+    }
+  }
+  
+  return fix as Fix;
+}
+
+function getFixType(result: any): string {
+  if (result.type === 'detached' || result.type.startsWith('modified') || 
+      result.type === 'nonLibrary' || result.type.includes('component')) {
+    return 'component';
+  } else if (result.type === 'fill' || result.type === 'stroke' || 
+             result.type === 'effect' || result.type === 'text') {
+    return 'style';
+  } else {
+    return 'variable';
+  }
+}
+
+// Update the table update functions to use the new event handling
 function updateComponentsTable(componentResults: any[]): void {
   const tableBody = document.getElementById('componentsTableBody');
   const emptyState = document.getElementById('componentsEmpty');
@@ -172,69 +395,14 @@ function updateComponentsTable(componentResults: any[]): void {
   
   emptyState.style.display = 'none';
   
+  // Use our new row creation function for consistency
   componentResults.forEach(result => {
-    const row = document.createElement('tr');
-    row.classList.add('issue-row');
-    row.dataset.nodeId = result.node.id;
-    
-    row.innerHTML = `
-      <td>${result.node.name}</td>
-      <td>${result.message}</td>
-      <td>
-        <button class="button button-small button-secondary locate-btn">Locate</button>
-        ${result.type.startsWith('modified') ? 
-          '<button class="button button-small button-secondary fix-btn" data-fix="reset">Reset</button>' : ''}
-        ${result.type === 'detached' && result.mainComponentId ? 
-          '<button class="button button-small button-secondary fix-btn" data-fix="swap">Swap</button>' : ''}
-      </td>
-    `;
-    
+    const row = createComponentResultRow(result);
     tableBody.appendChild(row);
   });
   
-  // Add click event for locate buttons
-  tableBody.querySelectorAll('.locate-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      const row = target.closest('.issue-row');
-      if (row) {
-        const nodeId = (row as HTMLElement).dataset.nodeId;
-        if (nodeId) {
-          parent.postMessage({ pluginMessage: { type: 'highlightNode', payload: { nodeId } } }, '*');
-        }
-      }
-    });
-  });
-  
-  // Add click event for fix buttons
-  tableBody.querySelectorAll('.fix-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      const row = target.closest('.issue-row');
-      if (row) {
-        const nodeId = (row as HTMLElement).dataset.nodeId;
-        const fixType = (target as HTMLElement).dataset.fix;
-        
-        if (nodeId && fixType) {
-          const fix: Fix = {
-            nodeId,
-            type: 'component',
-            fixType: fixType as any
-          };
-          
-          // If swap, we need to get component key from main component
-          if (fixType === 'swap') {
-            const componentResult = componentResults.find(r => r.node.id === nodeId);
-            if (componentResult && componentResult.mainComponentId) {
-              (fix as any).componentKey = componentResult.mainComponentKey;
-            }
-          }
-          
-          parent.postMessage({ pluginMessage: { type: 'applyFix', payload: { fix } } }, '*');
-        }
-      }
-    });
-  });
+  // Add event handlers
+  addTableEventHandlers(tableBody, componentResults);
 }
 
 // Update styles table
@@ -279,7 +447,7 @@ function updateStylesTable(styleResults: any[]): void {
     tableBody.appendChild(row);
   });
   
-  // Add click event handlers
+  // Add event handlers
   addTableEventHandlers(tableBody, styleResults);
 }
 
@@ -325,63 +493,8 @@ function updateVariablesTable(tokenResults: any[]): void {
     tableBody.appendChild(row);
   });
   
-  // Add click event handlers
+  // Add event handlers
   addTableEventHandlers(tableBody, tokenResults);
-}
-
-// Common table event handlers
-function addTableEventHandlers(tableBody: HTMLElement, results: any[]): void {
-  // Add click event for locate buttons
-  tableBody.querySelectorAll('.locate-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      const row = target.closest('.issue-row');
-      if (row) {
-        const nodeId = (row as HTMLElement).dataset.nodeId;
-        if (nodeId) {
-          parent.postMessage({ pluginMessage: { type: 'highlightNode', payload: { nodeId } } }, '*');
-        }
-      }
-    });
-  });
-  
-  // Add click event for fix buttons
-  tableBody.querySelectorAll('.fix-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      const row = target.closest('.issue-row');
-      if (row) {
-        const nodeId = (row as HTMLElement).dataset.nodeId;
-        const fixType = (target as HTMLElement).dataset.fix;
-        
-        if (nodeId) {
-          // Find the result for this node
-          const result = results.find(r => r.node.id === nodeId);
-          
-          if (result && result.suggestions && result.suggestions.length > 0) {
-            const suggestion = result.suggestions[0];
-            
-            let fix: any = {
-              nodeId,
-              type: fixType,
-            };
-            
-            if (fixType === 'style') {
-              fix.styleType = result.type;
-              fix.style = suggestion;
-            } else if (fixType === 'variable') {
-              fix.property = result.type === 'missingVariable' ? 
-                (result.message.includes('color') ? 'fills' : 'cornerRadius') : 
-                'fills'; // Default to fills for other types
-              fix.variable = suggestion;
-            }
-            
-            parent.postMessage({ pluginMessage: { type: 'applyFix', payload: { fix } } }, '*');
-          }
-        }
-      }
-    });
-  });
 }
 
 // Update library select
@@ -401,63 +514,356 @@ function updateLibrarySelect(libraries: any[]): void {
   });
 }
 
-// Handle messages from the plugin
-window.onmessage = (event) => {
-  const message = event.data.pluginMessage as PluginMessage;
+// Add Fix Preview function
+function showFixPreview(result: any, fixType: string) {
+  const previewContainer = document.getElementById('fixPreviewContainer');
+  if (!previewContainer) return;
   
-  if (!message) return;
+  // Clear previous preview
+  previewContainer.innerHTML = '';
   
-  if (message.type === 'checkResults') {
-    // Hide loading state
-    loadingState.style.display = 'none';
-    
-    const results = message.payload as CheckResults;
-    
-    // Update summary metrics
-    updateSummaryMetrics(results.metrics);
-    
-    // Update issue counts
-    updateIssueCounts(
-      results.componentResults.length, 
-      results.styleResults.length, 
-      results.tokenResults.length
-    );
-    
-    // Update component issues table
-    updateComponentsTable(results.componentResults);
-    
-    // Update style issues table
-    updateStylesTable(results.styleResults);
-    
-    // Update variable issues table
-    updateVariablesTable(results.tokenResults);
-    
-    // Update library select
-    updateLibrarySelect(results.libraries);
-    
-    // Show summary tab by default
-    tabs.forEach(t => t.classList.remove('active'));
-    const summaryTab = document.querySelector('[data-tab="summary"]');
-    if (summaryTab) {
-      summaryTab.classList.add('active');
+  // Create preview content based on fix type
+  let previewContent = '';
+  
+  if (fixType === 'style') {
+    const suggestion = result.suggestions && result.suggestions.length > 0 ? result.suggestions[0] : null;
+    if (suggestion) {
+      previewContent = `
+        <div class="preview-header">Style Fix Preview</div>
+        <div class="preview-content">
+          <div class="preview-row">
+            <div class="preview-label">Current Value:</div>
+            <div class="preview-value">${result.value}</div>
+          </div>
+          <div class="preview-row">
+            <div class="preview-label">Suggested Style:</div>
+            <div class="preview-value">${suggestion.name} (${suggestion.source})</div>
+          </div>
+          ${suggestion.value.startsWith('#') ? 
+            `<div class="preview-color-sample" style="background-color: ${suggestion.value}"></div>` : ''}
+        </div>
+        <div class="preview-actions">
+          <button class="button button-primary apply-preview-btn" data-fix="${fixType}" data-node-id="${result.node.id}">
+            Apply Fix
+          </button>
+          <button class="button button-secondary close-preview-btn">
+            Cancel
+          </button>
+        </div>
+      `;
     }
-    
-    tabContents.forEach(content => {
-      (content as HTMLElement).style.display = 'none';
+  } else if (fixType === 'variable') {
+    const suggestion = result.suggestions && result.suggestions.length > 0 ? result.suggestions[0] : null;
+    if (suggestion) {
+      previewContent = `
+        <div class="preview-header">Variable Fix Preview</div>
+        <div class="preview-content">
+          <div class="preview-row">
+            <div class="preview-label">Current Value:</div>
+            <div class="preview-value">${result.value}</div>
+          </div>
+          <div class="preview-row">
+            <div class="preview-label">Suggested Variable:</div>
+            <div class="preview-value">${suggestion.name}</div>
+          </div>
+        </div>
+        <div class="preview-actions">
+          <button class="button button-primary apply-preview-btn" data-fix="${fixType}" data-node-id="${result.node.id}">
+            Apply Fix
+          </button>
+          <button class="button button-secondary close-preview-btn">
+            Cancel
+          </button>
+        </div>
+      `;
+    }
+  } else if (fixType === 'component') {
+    previewContent = `
+      <div class="preview-header">Component Fix Preview</div>
+      <div class="preview-content">
+        <div class="preview-row">
+          <div class="preview-label">Issue:</div>
+          <div class="preview-value">${result.message}</div>
+        </div>
+        ${result.details ? 
+          `<div class="preview-row">
+            <div class="preview-label">Details:</div>
+            <div class="preview-value">${result.details}</div>
+          </div>` : ''}
+        ${result.mainComponentName ? 
+          `<div class="preview-row">
+            <div class="preview-label">Main Component:</div>
+            <div class="preview-value">${result.mainComponentName}</div>
+          </div>` : ''}
+      </div>
+      <div class="preview-actions">
+        ${result.type.startsWith('modified') ? 
+          `<button class="button button-primary apply-preview-btn" data-fix="reset" data-node-id="${result.node.id}">
+            Reset to Main Component
+          </button>` : ''}
+        ${result.type === 'detached' && result.mainComponentId ? 
+          `<button class="button button-primary apply-preview-btn" data-fix="swap" data-node-id="${result.node.id}">
+            Swap to Component
+          </button>` : ''}
+        <button class="button button-secondary close-preview-btn">
+          Cancel
+        </button>
+      </div>
+    `;
+  }
+  
+  previewContainer.innerHTML = previewContent;
+  previewContainer.style.display = 'block';
+  
+  // Add event listeners to buttons
+  const applyBtn = previewContainer.querySelector('.apply-preview-btn');
+  const closeBtn = previewContainer.querySelector('.close-preview-btn');
+  
+  if (applyBtn) {
+    applyBtn.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const nodeId = target.dataset.nodeId;
+      const fixType = target.dataset.fix;
+      
+      if (nodeId && fixType) {
+        // Find the result for this node
+        const resultToFix = result;
+        
+        // Show loading state
+        target.textContent = 'Applying...';
+        (target as HTMLButtonElement).disabled = true;
+        
+        // Create and send the fix request
+        const fix = createFixObject(resultToFix, fixType);
+        parent.postMessage({ pluginMessage: { type: 'applyFix', payload: { fix } } }, '*');
+        
+        // Hide preview
+        previewContainer.style.display = 'none';
+      }
     });
-    const summaryTabContent = document.getElementById('summaryTab');
-    if (summaryTabContent) {
-      summaryTabContent.style.display = 'block';
+  }
+  
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      previewContainer.style.display = 'none';
+    });
+  }
+}
+
+// Add filter functions
+function applyFilters() {
+  const severityFilter = (document.getElementById('severityFilter') as HTMLSelectElement).value;
+  const typeFilter = (document.getElementById('typeFilter') as HTMLSelectElement).value;
+  const sortBy = (document.getElementById('sortBy') as HTMLSelectElement).value;
+  const groupBy = (document.getElementById('groupBy') as HTMLSelectElement).value;
+  
+  // Get current results from our state
+  if (!window.currentResults) return;
+  
+  // Apply to component results
+  const filteredComponentResults = filterResults(window.currentResults.componentResults, severityFilter, typeFilter);
+  const sortedComponentResults = sortResults(filteredComponentResults, sortBy);
+  
+  if (groupBy === 'none') {
+    updateComponentsTable(sortedComponentResults);
+  } else {
+    updateComponentsTableWithGroups(sortedComponentResults, groupBy);
+  }
+  
+  // We could do the same for style and variable results as well
+}
+
+function filterResults(results: any[], severity: string, type: string): any[] {
+  return results.filter(result => {
+    if (severity !== 'all') {
+      // Map message type to severity
+      const resultSeverity = getSeverity(result);
+      if (resultSeverity !== severity) return false;
+    }
+    
+    if (type !== 'all' && result.type !== type) return false;
+    
+    return true;
+  });
+}
+
+function sortResults(results: any[], sortBy: string): any[] {
+  return [...results].sort((a, b) => {
+    if (sortBy === 'severity') {
+      return getSeverityWeight(a) - getSeverityWeight(b);
+    } else if (sortBy === 'type') {
+      return a.type.localeCompare(b.type);
+    } else if (sortBy === 'name') {
+      return a.node.name.localeCompare(b.node.name);
+    }
+    return 0;
+  });
+}
+
+function getSeverity(result: any): string {
+  // Map result types to severity levels
+  if (result.type === 'detached' || 
+      result.type === 'missingVariable' ||
+      result.type === 'modified-forbidden') {
+    return 'high';
+  } else if (result.type.startsWith('modified') ||
+             result.type === 'fill' ||
+             result.type === 'stroke') {
+    return 'medium';
+  } else {
+    return 'low';
+  }
+}
+
+function getSeverityWeight(result: any): number {
+  const severity = getSeverity(result);
+  switch (severity) {
+    case 'high': return 1;
+    case 'medium': return 2;
+    case 'low': return 3;
+    default: return 4;
+  }
+}
+
+function groupResults(results: any[], groupBy: string): Record<string, any[]> {
+  const groups: Record<string, any[]> = {};
+  
+  results.forEach(result => {
+    let groupKey;
+    
+    if (groupBy === 'type') {
+      groupKey = result.type;
+    } else if (groupBy === 'severity') {
+      groupKey = getSeverity(result);
+    } else if (groupBy === 'component') {
+      // Group by component name or ID for component results
+      groupKey = result.node.name;
+    } else {
+      groupKey = 'ungrouped';
+    }
+    
+    if (!groups[groupKey]) {
+      groups[groupKey] = [];
+    }
+    
+    groups[groupKey].push(result);
+  });
+  
+  return groups;
+}
+
+function updateComponentsTableWithGroups(results: any[], groupBy: string) {
+  const tableBody = document.getElementById('componentsTableBody');
+  if (!tableBody) return;
+  
+  tableBody.innerHTML = '';
+  
+  const groups = groupResults(results, groupBy);
+  
+  // Sort group keys for consistent order
+  const sortedGroupKeys = Object.keys(groups).sort((a, b) => {
+    // Special sort for severity groups
+    if (groupBy === 'severity') {
+      const severityOrder: Record<string, number> = { 'high': 1, 'medium': 2, 'low': 3 };
+      return (severityOrder[a] || 99) - (severityOrder[b] || 99);
+    }
+    return a.localeCompare(b);
+  });
+  
+  for (const groupName of sortedGroupKeys) {
+    const groupResults = groups[groupName];
+    
+    // Add group header
+    const groupRow = document.createElement('tr');
+    groupRow.classList.add('group-header');
+    
+    let displayGroupName = groupName;
+    // Format the group name
+    if (groupBy === 'severity') {
+      displayGroupName = groupName.charAt(0).toUpperCase() + groupName.slice(1) + ' Severity';
+    } else if (groupBy === 'type') {
+      displayGroupName = formatGroupType(groupName);
+    }
+    
+    groupRow.innerHTML = `
+      <td colspan="3" class="group-title">
+        ${displayGroupName} (${groupResults.length} items)
+        <button class="button button-small button-secondary group-toggle">Collapse</button>
+      </td>
+    `;
+    tableBody.appendChild(groupRow);
+    
+    // Add group items
+    const groupContainer = document.createElement('tbody');
+    groupContainer.classList.add('group-items');
+    
+    groupResults.forEach(result => {
+      const row = createComponentResultRow(result);
+      groupContainer.appendChild(row);
+    });
+    
+    tableBody.appendChild(groupContainer);
+    
+    // Add event handler for group toggle
+    const toggleBtn = groupRow.querySelector('.group-toggle');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        const isCollapsed = groupContainer.classList.toggle('collapsed');
+        toggleBtn.textContent = isCollapsed ? 'Expand' : 'Collapse';
+      });
     }
   }
-  else if (message.type === 'exportReportData') {
-    // Create download link for report data
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(message.payload);
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", "design-system-report.json");
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  }
-};
+  
+  // Add event handlers
+  addTableEventHandlers(tableBody, results);
+}
+
+function formatGroupType(type: string): string {
+  // Convert type names to more readable format
+  // For example: "modified-size" -> "Modified Size"
+  return type
+    .split('-')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function createComponentResultRow(result: any): HTMLTableRowElement {
+  const row = document.createElement('tr');
+  row.classList.add('issue-row');
+  row.dataset.nodeId = result.node.id;
+  
+  // Add severity class for styling
+  row.classList.add(`severity-${getSeverity(result)}`);
+  
+  row.innerHTML = `
+    <td>${result.node.name}</td>
+    <td>${result.message}</td>
+    <td>
+      <button class="button button-small button-secondary locate-btn">Locate</button>
+      ${result.type.startsWith('modified') ? 
+        '<button class="button button-small button-secondary fix-btn" data-fix="reset">Reset</button>' : ''}
+      ${result.type === 'detached' && result.mainComponentId ? 
+        '<button class="button button-small button-secondary fix-btn" data-fix="swap">Swap</button>' : ''}
+      ${(result.suggestions && result.suggestions.length > 0) ? 
+        '<button class="button button-small button-secondary preview-btn">Preview</button>' : ''}
+    </td>
+  `;
+  
+  return row;
+}
+
+// Initialize the filter controls
+function initFilterControls() {
+  const filterElements = [
+    document.getElementById('severityFilter'),
+    document.getElementById('typeFilter'),
+    document.getElementById('sortBy'),
+    document.getElementById('groupBy')
+  ];
+  
+  filterElements.forEach(element => {
+    if (element) {
+      element.addEventListener('change', applyFilters);
+    }
+  });
+}

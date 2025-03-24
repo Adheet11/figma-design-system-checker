@@ -12,6 +12,9 @@
       <button id="runCheckBtn" class="button button-primary">Run Check</button>
     </div>
     
+    <!-- Error container for displaying error messages -->
+    <div id="errorContainer" class="error-container" style="display: none;"></div>
+    
     <div class="tabs">
       <div class="tab active" data-tab="summary">Summary</div>
       <div class="tab" data-tab="components">Components</div>
@@ -33,6 +36,9 @@
         <h3>No Data Available</h3>
         <p>Run a design system check to see results here.</p>
       </div>
+      
+      <!-- Fix Preview Container -->
+      <div id="fixPreviewContainer" class="preview-container" style="display: none;"></div>
       
       <!-- Summary Tab -->
       <div id="summaryTab" class="tab-content" style="display: none;">
@@ -115,6 +121,44 @@
         <div class="card">
           <div class="card-header">Component Issues</div>
           <div class="card-content">
+            <div class="filter-controls">
+              <div class="filter-group">
+                <label for="severityFilter">Severity:</label>
+                <select id="severityFilter" class="form-select">
+                  <option value="all">All</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="typeFilter">Type:</label>
+                <select id="typeFilter" class="form-select">
+                  <option value="all">All</option>
+                  <option value="component">Component</option>
+                  <option value="style">Style</option>
+                  <option value="variable">Variable</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="sortBy">Sort by:</label>
+                <select id="sortBy" class="form-select">
+                  <option value="severity">Severity</option>
+                  <option value="type">Type</option>
+                  <option value="name">Name</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="groupBy">Group by:</label>
+                <select id="groupBy" class="form-select">
+                  <option value="none">None</option>
+                  <option value="type">Type</option>
+                  <option value="severity">Severity</option>
+                  <option value="component">Component</option>
+                </select>
+              </div>
+            </div>
+            
             <table class="table" id="componentsTable">
               <thead>
                 <tr>

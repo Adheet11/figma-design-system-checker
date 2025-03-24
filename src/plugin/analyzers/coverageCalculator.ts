@@ -1,9 +1,5 @@
 import { traverseNode, isNodeVisible } from '../utils';
-import { ComponentCheckResult as PluginComponentCheckResult } from '../checkers/componentChecker';
-import { ComponentCheckResult } from '../../shared/types';
-import { StyleCheckResult as PluginStyleCheckResult } from '../checkers/styleChecker';
-import { StyleCheckResult } from '../../shared/types';
-import { TokenCheckResult } from '../../shared/types';
+import { ComponentCheckResult, StyleCheckResult, TokenCheckResult } from '../../shared/types';
 
 // Interface for coverage metrics
 export interface CoverageMetrics {

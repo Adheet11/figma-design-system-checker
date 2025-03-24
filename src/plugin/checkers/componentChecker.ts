@@ -1,178 +1,291 @@
-// Interface for component checking results
-export interface ComponentCheckResult {
-    node: SceneNode;
-    type: string; // 'detached', 'modified', 'nonLibrary'
-    message: string;
-    details?: string;
-    mainComponent?: ComponentNode | null;
-  }
+import { ComponentCheckResult } from '../../shared/types';
+
+// Check if a component instance is properly used
+export function checkComponent(instance: InstanceNode): ComponentCheckResult[] {
+  const results: ComponentCheckResult[] = [];
   
-  // Check if a component instance is properly used
-  export function checkComponent(node: SceneNode): ComponentCheckResult[] {
-    const results: ComponentCheckResult[] = [];
-    
-    // Only check instance nodes
-    if (node.type !== 'INSTANCE') {
-      return results;
-    }
-    
-    const instance = node as InstanceNode;
-    
-    // Check if the instance has been detached
-    if (!instance.mainComponent) {
-      results.push({
-        node: instance,
-        type: 'detached',
-        message: 'Instance has been detached from main component',
-        details: 'This component is no longer linked to its main component'
-      });
-      return results;
-    }
-    
-    // Check if the component is from a library
-    // This assumes components not in a team library should be flagged
-    if (!instance.mainComponent.remote) {
-      results.push({
-        node: instance,
-        type: 'nonLibrary',
-        message: 'Component is not from team library',
-        details: `Using local component: ${instance.mainComponent.name}`,
-        mainComponent: instance.mainComponent
-      });
-    }
-    
-    // Check for overrides (modifications) to the instance
+  // Check if component is from a library
+  const isFromLibrary = isComponentFromLibrary(instance);
+  
+  // Check for detached component 
+  if (!instance.mainComponent) {
+    results.push({
+      node: instance,
+      type: 'detached',
+      message: 'Component is detached from its main component',
+      details: 'Detached components lose their connection to the design system'
+    });
+  }
+  // Check for non-library component
+  else if (!isFromLibrary && instance.mainComponent) {
+    results.push({
+      node: instance,
+      type: 'nonLibrary',
+      message: 'Component is not from a team library',
+      details: 'Using team library components improves consistency',
+      mainComponent: instance.mainComponent
+    });
+  }
+  // Check for overrides
+  else if (instance.mainComponent) {
     checkForOverrides(instance, results);
-    
-    return results;
   }
   
-  // Check for overrides in a component instance
-  function checkForOverrides(instance: InstanceNode, results: ComponentCheckResult[]): void {
-    // Check if the instance has overridden properties
-    if (instance.overrides && instance.overrides.length > 0) {
-      // Get the overridden properties
-      const overriddenProps = instance.overrides.map(override => 
-        override.overriddenFields.join(', ')
-      );
+  return results;
+}
+
+// Check for overrides in a component instance
+function checkForOverrides(instance: InstanceNode, results: ComponentCheckResult[]): void {
+  // Check for overrides that violate design system rules
+  
+  // Get all overridden properties
+  const overriddenProperties = getOverriddenProperties(instance);
+  
+  // Only report if there are overrides
+  if (overriddenProperties.length > 0 && instance.mainComponent) {
+    // Add check for size modifications
+    if (instance.width !== instance.mainComponent.width || 
+        instance.height !== instance.mainComponent.height) {
       
-      // Group overrides by type for clearer reporting
-      const textOverrides = instance.overrides.filter(override => 
-        override.overriddenFields.includes('characters') ||
-        override.overriddenFields.includes('textStyleId') ||
-        override.overriddenFields.includes('fontName') ||
-        override.overriddenFields.includes('fontSize') ||
-        override.overriddenFields.includes('letterSpacing') ||
-        override.overriddenFields.includes('lineHeight') ||
-        override.overriddenFields.includes('textCase')
-      );
-      
-      const styleOverrides = instance.overrides.filter(override => 
-        override.overriddenFields.includes('fillStyleId') ||
-        override.overriddenFields.includes('strokeStyleId') ||
-        override.overriddenFields.includes('effectStyleId')
-      );
-      
-      const sizeOverrides = instance.overrides.filter(override => 
-        override.overriddenFields.includes('width') ||
-        override.overriddenFields.includes('height') ||
-        override.overriddenFields.includes('constrainProportions')
-      );
-      
-      const layoutOverrides = instance.overrides.filter(override => 
-        override.overriddenFields.includes('itemSpacing') ||
-        override.overriddenFields.includes('paddingLeft') ||
-        override.overriddenFields.includes('paddingRight') ||
-        override.overriddenFields.includes('paddingTop') ||
-        override.overriddenFields.includes('paddingBottom') ||
-        override.overriddenFields.includes('layoutMode') ||
-        override.overriddenFields.includes('primaryAxisAlignItems') ||
-        override.overriddenFields.includes('counterAxisAlignItems')
-      );
-      
-      // Add results for each type of override
-      if (textOverrides.length > 0) {
-        results.push({
-          node: instance,
-          type: 'modified-text',
-          message: 'Component text properties have been modified',
-          details: `Modified text properties on ${textOverrides.length} layer(s)`,
-          mainComponent: instance.mainComponent
-        });
-      }
-      
-      if (styleOverrides.length > 0) {
-        results.push({
-          node: instance,
-          type: 'modified-style',
-          message: 'Component styles have been modified',
-          details: `Modified styles on ${styleOverrides.length} layer(s)`,
-          mainComponent: instance.mainComponent
-        });
-      }
-      
-      if (sizeOverrides.length > 0) {
+      // Only flag if not using constraints that allow resizing
+      if (instance.constraints.horizontal === "SCALE" && 
+          instance.constraints.vertical === "SCALE") {
         results.push({
           node: instance,
           type: 'modified-size',
           message: 'Component size has been modified',
-          details: `Size changes on ${sizeOverrides.length} layer(s)`,
-          mainComponent: instance.mainComponent
-        });
-      }
-      
-      if (layoutOverrides.length > 0) {
-        results.push({
-          node: instance,
-          type: 'modified-layout',
-          message: 'Component layout has been modified',
-          details: `Layout changes on ${layoutOverrides.length} layer(s)`,
-          mainComponent: instance.mainComponent
-        });
-      }
-      
-      // Report any other overrides not covered by the above categories
-      const otherOverrides = instance.overrides.filter(override => 
-        !textOverrides.includes(override) &&
-        !styleOverrides.includes(override) &&
-        !sizeOverrides.includes(override) &&
-        !layoutOverrides.includes(override)
-      );
-      
-      if (otherOverrides.length > 0) {
-        results.push({
-          node: instance,
-          type: 'modified-other',
-          message: 'Component has other modifications',
-          details: `Other modifications on ${otherOverrides.length} layer(s)`,
+          details: `Size changed from ${instance.mainComponent.width}×${instance.mainComponent.height} to ${instance.width}×${instance.height}`,
           mainComponent: instance.mainComponent
         });
       }
     }
     
-    // Check if component properties have been changed
-    if (instance.componentProperties) {
-      const changedProps = [];
+    // Check for significant style overrides
+    if (hasSignificantStyleOverrides(instance, overriddenProperties)) {
+      results.push({
+        node: instance,
+        type: 'modified-styles',
+        message: 'Component has significant style overrides',
+        details: `${overriddenProperties.length} properties have been overridden`,
+        mainComponent: instance.mainComponent
+      });
+    }
+    
+    // Add check for forbidden overrides based on design system rules
+    checkForbiddenOverrides(instance, results);
+  }
+}
+
+function checkForbiddenOverrides(instance: InstanceNode, results: ComponentCheckResult[]): void {
+  // Check for overrides that should never happen according to design system rules
+  if (!instance.mainComponent) return;
+  
+  // Example: Check if a button component has its border radius changed
+  if (instance.name.toLowerCase().includes('button')) {
+    // Find all rectangle shapes in the instance
+    const rectangles = findAllRectanglesInInstance(instance);
+    
+    // Check if any rectangle has a modified corner radius
+    for (const rect of rectangles) {
+      // Use type assertion and safer property access
+      const cornerRadius = (rect as any).cornerRadius;
+      const boundCornerRadius = (rect as any).boundVariables?.cornerRadius;
       
-      for (const [key, prop] of Object.entries(instance.componentProperties)) {
-        // Skip properties that are meant to be changed (variants)
-        if (prop.type === 'VARIANT') continue;
-        
-        // Check if instance property differs from main component default
-        const mainComponentProp = instance.mainComponent?.componentPropertyDefinitions[key];
-        if (mainComponentProp && prop.value !== mainComponentProp.defaultValue) {
-          changedProps.push(key);
-        }
-      }
-      
-      if (changedProps.length > 0) {
+      if (cornerRadius !== undefined && cornerRadius !== boundCornerRadius) {
         results.push({
           node: instance,
-          type: 'modified-properties',
-          message: 'Component properties have been changed',
-          details: `Changed properties: ${changedProps.join(', ')}`,
+          type: 'modified-forbidden',
+          message: 'Button component has modified corner radius',
+          details: 'Button corner radii should be standardized across the design system',
           mainComponent: instance.mainComponent
         });
+        break;
       }
     }
   }
+  
+  // Example: Check if a card component has its shadow modified
+  if (instance.name.toLowerCase().includes('card')) {
+    // Find nodes with effects
+    const nodesWithEffects = findNodesWithEffects(instance);
+    
+    // Check if any effect is overridden
+    for (const node of nodesWithEffects) {
+      // Use type assertion to safely access effects property
+      const nodeWithEffects = node as any;
+      
+      if (nodeWithEffects.effects && 
+          nodeWithEffects.effects.length > 0 && 
+          !nodeWithEffects.effectStyleId) {
+        results.push({
+          node: instance,
+          type: 'modified-forbidden',
+          message: 'Card component has modified shadow',
+          details: 'Card shadows should use the design system standard elevation tokens',
+          mainComponent: instance.mainComponent
+        });
+        break;
+      }
+    }
+  }
+}
+
+// Helper function to get all overridden properties
+function getOverriddenProperties(instance: InstanceNode): string[] {
+  const overrides: string[] = [];
+  
+  // Check for overridden texts
+  const textNodes = findAllTextNodesInInstance(instance);
+  for (const node of textNodes) {
+    // Safe check for properties
+    const mainComponentNode = (node as any).mainComponent;
+    if (mainComponentNode && node.characters !== mainComponentNode.characters) {
+      overrides.push('text');
+    }
+  }
+  
+  // Check for overridden fills
+  const nodesWithFills = findNodesWithFills(instance);
+  for (const node of nodesWithFills) {
+    // Type assertions for safer property access
+    const mainComponentNode = (node as any).mainComponent;
+    const nodeFills = ('fills' in node) ? node.fills : undefined;
+    const mainComponentFills = mainComponentNode ? mainComponentNode.fills : undefined;
+    
+    if (mainComponentNode && 
+        JSON.stringify(nodeFills) !== JSON.stringify(mainComponentFills)) {
+      overrides.push('fills');
+    }
+  }
+  
+  // Check for overridden strokes
+  const nodesWithStrokes = findNodesWithStrokes(instance);
+  for (const node of nodesWithStrokes) {
+    // Type assertions for safer property access
+    const mainComponentNode = (node as any).mainComponent;
+    const nodeStrokes = ('strokes' in node) ? node.strokes : undefined;
+    const mainComponentStrokes = mainComponentNode ? mainComponentNode.strokes : undefined;
+    
+    if (mainComponentNode && 
+        JSON.stringify(nodeStrokes) !== JSON.stringify(mainComponentStrokes)) {
+      overrides.push('strokes');
+    }
+  }
+  
+  return overrides;
+}
+
+// Helper function to check if there are significant style overrides
+function hasSignificantStyleOverrides(instance: InstanceNode, overrides: string[]): boolean {
+  // Consider it significant if there are more than 2 overridden properties
+  return overrides.length > 2;
+}
+
+// Helper to find all rectangles in an instance
+function findAllRectanglesInInstance(instance: InstanceNode): RectangleNode[] {
+  const rectangles: RectangleNode[] = [];
+  
+  function traverseForRectangles(node: any) {
+    if (node.type === 'RECTANGLE') {
+      rectangles.push(node);
+    }
+    
+    if ('children' in node) {
+      for (const child of node.children) {
+        traverseForRectangles(child);
+      }
+    }
+  }
+  
+  traverseForRectangles(instance);
+  return rectangles;
+}
+
+// Helper to find all text nodes in an instance
+function findAllTextNodesInInstance(instance: InstanceNode): TextNode[] {
+  const textNodes: TextNode[] = [];
+  
+  function traverseForTextNodes(node: any) {
+    if (node.type === 'TEXT') {
+      textNodes.push(node);
+    }
+    
+    if ('children' in node) {
+      for (const child of node.children) {
+        traverseForTextNodes(child);
+      }
+    }
+  }
+  
+  traverseForTextNodes(instance);
+  return textNodes;
+}
+
+// Helper to find nodes with fills
+function findNodesWithFills(instance: InstanceNode): SceneNode[] {
+  const nodes: SceneNode[] = [];
+  
+  function traverseForFills(node: any) {
+    if ('fills' in node && node.fills && node.fills.length > 0) {
+      nodes.push(node);
+    }
+    
+    if ('children' in node) {
+      for (const child of node.children) {
+        traverseForFills(child);
+      }
+    }
+  }
+  
+  traverseForFills(instance);
+  return nodes;
+}
+
+// Helper to find nodes with strokes
+function findNodesWithStrokes(instance: InstanceNode): SceneNode[] {
+  const nodes: SceneNode[] = [];
+  
+  function traverseForStrokes(node: any) {
+    if ('strokes' in node && node.strokes && node.strokes.length > 0) {
+      nodes.push(node);
+    }
+    
+    if ('children' in node) {
+      for (const child of node.children) {
+        traverseForStrokes(child);
+      }
+    }
+  }
+  
+  traverseForStrokes(instance);
+  return nodes;
+}
+
+// Helper to find nodes with effects
+function findNodesWithEffects(instance: InstanceNode): SceneNode[] {
+  const nodes: SceneNode[] = [];
+  
+  function traverseForEffects(node: any) {
+    if ('effects' in node && node.effects && node.effects.length > 0) {
+      nodes.push(node);
+    }
+    
+    if ('children' in node) {
+      for (const child of node.children) {
+        traverseForEffects(child);
+      }
+    }
+  }
+  
+  traverseForEffects(instance);
+  return nodes;
+}
+
+// Determines if component is from a library
+function isComponentFromLibrary(instance: InstanceNode): boolean {
+  if (!instance.mainComponent) return false;
+  
+  const mainComponent = instance.mainComponent;
+  // Check if the component is from a library
+  return mainComponent.remote !== null;
+}
