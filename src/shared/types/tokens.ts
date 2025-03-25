@@ -11,11 +11,11 @@ export interface TokenInfo {
 
 // Interface for design system tokens for checking
 export interface DesignSystemTokens {
-  colorTokens: Map<string, Variable>;
-  typographyTokens: Map<string, Variable>;
-  spacingTokens: Map<string, Variable>;
-  borderRadiusTokens: Map<string, Variable>;
-  shadowTokens: Map<string, Variable>;
+  colorTokens: Map<string, any>;
+  typographyTokens: Map<string, any>;
+  spacingTokens: Map<string, any>;
+  borderRadiusTokens: Map<string, any>;
+  shadowTokens: Map<string, any>;
   fontFamilies?: string[]; // Approved font families
 }
 
@@ -39,4 +39,22 @@ export interface TokenSuggestion {
   id: string;
   value: string;
   distance?: number; // For color suggestions, how close the match is
+}
+
+// Interface for cached design system
+export interface CachedDesignSystem {
+  id: string;
+  name: string;
+  lastUpdated: number;
+  components: any[];
+  styles: any[];
+  variables: any[];
+  categorizedTokens: {
+    colorTokens: any[];
+    typographyTokens: any[];
+    spacingTokens: any[];
+    borderRadiusTokens: any[];
+    shadowTokens: any[];
+  };
+  fontFamilies?: string[];
 } 

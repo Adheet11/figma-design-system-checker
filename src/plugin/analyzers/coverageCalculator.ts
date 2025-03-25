@@ -25,6 +25,12 @@ export interface CoverageMetrics {
   styleCoverage: number;
   variableCoverage: number;
   overallCoverage: number;
+  
+  // Analysis metadata
+  scopeType?: string; // 'selection', 'page', or 'document'
+  processingTime?: number; // Time taken to process
+  nodesProcessed?: number; // Actual nodes processed
+  totalNodesEstimate?: number; // Estimated total nodes 
 }
 
 // Calculate coverage metrics for a set of results

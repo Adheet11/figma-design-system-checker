@@ -20,6 +20,7 @@
       <div class="tab" data-tab="components">Components</div>
       <div class="tab" data-tab="styles">Styles</div>
       <div class="tab" data-tab="variables">Variables</div>
+      <div class="tab" data-tab="designSystem">Design Systems</div>
       <div class="tab" data-tab="settings">Settings</div>
     </div>
     
@@ -49,71 +50,76 @@
               <div class="summary-title">Overall Coverage</div>
               <div class="summary-value" id="overallCoverage">0%</div>
               <div class="progress-bar">
-                <div class="progress-value" id="overallProgress" style="width: 0%;"></div>
+                <div class="progress" id="overallCoverageBar" style="width: 0%"></div>
               </div>
             </div>
             
-            <div class="summary-grid" style="margin-top: 16px;">
-              <div class="summary-card">
-                <div class="summary-title">Component Coverage</div>
-                <div class="summary-value" id="componentCoverage">0%</div>
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-title">Component Coverage</div>
+                <div class="metric-value" id="componentCoverage">0%</div>
                 <div class="progress-bar">
-                  <div class="progress-value" id="componentProgress" style="width: 0%;"></div>
+                  <div class="progress" id="componentCoverageBar" style="width: 0%"></div>
                 </div>
               </div>
               
-              <div class="summary-card">
-                <div class="summary-title">Style Coverage</div>
-                <div class="summary-value" id="styleCoverage">0%</div>
+              <div class="metric-card">
+                <div class="metric-title">Style Coverage</div>
+                <div class="metric-value" id="styleCoverage">0%</div>
                 <div class="progress-bar">
-                  <div class="progress-value" id="styleProgress" style="width: 0%;"></div>
+                  <div class="progress" id="styleCoverageBar" style="width: 0%"></div>
                 </div>
               </div>
               
-              <div class="summary-card">
-                <div class="summary-title">Variable Usage</div>
-                <div class="summary-value" id="variableCoverage">0%</div>
+              <div class="metric-card">
+                <div class="metric-title">Variable Coverage</div>
+                <div class="metric-value" id="variableCoverage">0%</div>
                 <div class="progress-bar">
-                  <div class="progress-value" id="variableProgress" style="width: 0%;"></div>
+                  <div class="progress" id="variableCoverageBar" style="width: 0%"></div>
                 </div>
               </div>
-              
-              <div class="summary-card">
-                <div class="summary-title">Total Nodes</div>
-                <div class="summary-value" id="totalNodes">0</div>
+            </div>
+            
+            <!-- Analysis Metadata -->
+            <div class="metadata-container">
+              <h4>Analysis Info</h4>
+              <div class="analysis-metadata">
+                <div><strong>Scope:</strong> -</div>
+                <div><strong>Time:</strong> -</div>
+                <div><strong>Nodes Processed:</strong> -</div>
               </div>
+            </div>
+            
+            <div class="metrics-details">
+              <table class="metrics-table">
+                <tr>
+                  <td>Total Elements</td>
+                  <td id="totalNodes">0</td>
+                </tr>
+                <tr>
+                  <td>Library Components</td>
+                  <td id="libraryComponents">0</td>
+                </tr>
+                <tr>
+                  <td>Local Components</td>
+                  <td id="localComponents">0</td>
+                </tr>
+                <tr>
+                  <td>Detached Components</td>
+                  <td id="detachedComponents">0</td>
+                </tr>
+              </table>
             </div>
           </div>
         </div>
         
         <div class="card">
-          <div class="card-header">Issues Summary</div>
-          <div class="card-content">
-            <div class="summary-grid">
-              <div class="summary-card">
-                <div class="summary-title">Component Issues</div>
-                <div class="summary-value" id="componentIssues">0</div>
-              </div>
-              
-              <div class="summary-card">
-                <div class="summary-title">Style Issues</div>
-                <div class="summary-value" id="styleIssues">0</div>
-              </div>
-              
-              <div class="summary-card">
-                <div class="summary-title">Variable Issues</div>
-                <div class="summary-value" id="variableIssues">0</div>
-              </div>
-              
-              <div class="summary-card">
-                <div class="summary-title">Total Issues</div>
-                <div class="summary-value" id="totalIssues">0</div>
-              </div>
-            </div>
+          <div class="card-header">Detected Libraries</div>
+          <div class="card-content" id="detectedLibraries">
+            <!-- Libraries will be added here -->
+            <p>No libraries detected.</p>
           </div>
         </div>
-        
-        <button id="exportReportBtn" class="button button-secondary" style="margin-top: 16px;">Export Report</button>
       </div>
       
       <!-- Components Tab -->
@@ -231,11 +237,72 @@
         </div>
       </div>
       
+      <!-- Design System Tab -->
+      <div id="designSystemTab" class="tab-content" style="display: none;">
+        <div class="card">
+          <div class="card-header">Design System Manager</div>
+          <div class="card-content">
+            <div class="empty-state" id="noDesignSystemsState" style="display: none;">
+              <div class="empty-state-icon">📚</div>
+              <h3>No Design Systems Loaded</h3>
+              <p>Load a design system to improve performance and accuracy of checks.</p>
+            </div>
+            
+            <div id="designSystemList" style="display: none;">
+              <h3>Loaded Design Systems</h3>
+              <div class="design-system-list">
+                <!-- Design systems will be listed here -->
+              </div>
+            </div>
+            
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label">Add Design System</label>
+              <div class="input-with-button">
+                <input type="text" id="designSystemUrlInput" class="form-input" placeholder="Paste Figma file URL or file key" />
+                <button id="loadDesignSystemBtn" class="button button-primary">Load</button>
+              </div>
+              <p class="input-help">Paste the URL of a design system file or its file key to load it.</p>
+            </div>
+            
+            <div class="form-group" style="margin-top: 24px;">
+              <h3>How to Use</h3>
+              <ol class="instruction-list">
+                <li>Load your design system using the form above</li>
+                <li>Once loaded, the design system resources will be cached</li>
+                <li>Run design system checks on any file using the loaded resources</li>
+                <li>Performance will be significantly improved for all future checks</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <!-- Settings Tab -->
       <div id="settingsTab" class="tab-content" style="display: none;">
         <div class="card">
           <div class="card-header">Check Settings</div>
           <div class="card-content">
+            <div class="form-group">
+              <label class="form-label">Scan Scope</label>
+              <div class="radio-group">
+                <input type="radio" id="scopeSelection" name="scanScope" value="selection" checked>
+                <label for="scopeSelection">Selected elements only (recommended)</label>
+              </div>
+              
+              <div class="radio-group">
+                <input type="radio" id="scopePage" name="scanScope" value="page">
+                <label for="scopePage">Current page</label>
+              </div>
+              
+              <div class="radio-group">
+                <input type="radio" id="scopeDocument" name="scanScope" value="document">
+                <label for="scopeDocument">Entire document (slow)</label>
+              </div>
+              <p style="margin-top: 4px; font-size: 11px; color: #666;">
+                Limiting the scope significantly improves performance.
+              </p>
+            </div>
+            
             <div class="form-group">
               <div class="checkbox-group">
                 <input type="checkbox" id="visualizeIssues" checked>
@@ -243,7 +310,7 @@
               </div>
               
               <div class="checkbox-group">
-                <input type="checkbox" id="generateReport" checked>
+                <input type="checkbox" id="generateReport">
                 <label for="generateReport">Generate visual coverage report</label>
               </div>
               
@@ -254,12 +321,23 @@
             </div>
             
             <div class="form-group">
-              <label class="form-label">Design System Libraries</label>
+              <label class="form-label">Additional Libraries</label>
               <select id="librarySelect" class="form-select" multiple size="3">
                 <!-- Libraries will be added here -->
               </select>
               <p style="margin-top: 4px; font-size: 11px; color: #666;">
-                Libraries with names containing "Design System", "DS", or "Tokens" will be auto-detected.
+                These libraries will be checked in addition to the active design system.
+              </p>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Performance Settings</label>
+              <div class="checkbox-group">
+                <input type="checkbox" id="limitProcessingTime" checked>
+                <label for="limitProcessingTime">Limit processing time (60 seconds)</label>
+              </div>
+              <p style="margin-top: 4px; font-size: 11px; color: #666;">
+                When enabled, the plugin will stop analysis after 60 seconds to prevent freezing.
               </p>
             </div>
           </div>

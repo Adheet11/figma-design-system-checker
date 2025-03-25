@@ -5,6 +5,13 @@ import { checkComponent } from './checkers/componentChecker';
 import { calculateCoverage, createCoverageReport } from './analyzers/coverageCalculator';
 import { detectTeamLibraries, detectLocalStyleLibraries } from './analyzers/libraryDetector';
 import { 
+  loadDesignSystemFile, 
+  getCachedDesignSystems, 
+  getDesignSystemById,
+  deleteDesignSystem,
+  convertToDesignSystemTokens
+} from './designSystemLoader';
+import { 
   PluginMessage, 
   CheckResults, 
   Fix, 
@@ -17,9 +24,13 @@ import {
 import { TokenCheckResult } from '../shared/types/tokens';
 
 // Plugin settings
-const PLUGIN_UI_WIDTH = 500;
-const PLUGIN_UI_HEIGHT = 600;
-const BATCH_SIZE = 100;
+const PLUGIN_UI_WIDTH = 560;
+const PLUGIN_UI_HEIGHT = 640;
+const BATCH_SIZE = 50;
+const PROCESSING_TIME_LIMIT = 60000; // 60 seconds max processing time
+
+// Active design system ID
+let activeDesignSystemId: string | null = null;
 
 // Main plugin function
 figma.showUI(__html__, { width: PLUGIN_UI_WIDTH, height: PLUGIN_UI_HEIGHT });
@@ -27,12 +38,85 @@ figma.showUI(__html__, { width: PLUGIN_UI_WIDTH, height: PLUGIN_UI_HEIGHT });
 // Handle plugin initialization
 figma.ui.onmessage = async (msg: PluginMessage) => {
   try {
-    if (msg.type === 'checkDesignSystem') {
+    if (msg.type === 'init') {
+      // Initialize the plugin
+      const cachedSystems = await getCachedDesignSystems();
+      const storedActiveId = await figma.clientStorage.getAsync('activeDesignSystemId');
+      
+      activeDesignSystemId = storedActiveId || null;
+      
+      // Send cached design systems to UI
+      figma.ui.postMessage({
+        type: 'designSystemsLoaded',
+        payload: {
+          systems: cachedSystems,
+          activeId: activeDesignSystemId
+        }
+      });
+      
+    } else if (msg.type === 'loadDesignSystem') {
+      // Load a design system
+      const fileKey = msg.payload.fileKey;
+      const designSystem = await loadDesignSystemFile(fileKey);
+      
+      if (designSystem) {
+        // Set as active design system
+        activeDesignSystemId = designSystem.id;
+        await figma.clientStorage.setAsync('activeDesignSystemId', activeDesignSystemId);
+        
+        // Send updated design systems to UI
+        const cachedSystems = await getCachedDesignSystems();
+        figma.ui.postMessage({
+          type: 'designSystemsLoaded',
+          payload: {
+            systems: cachedSystems,
+            activeId: activeDesignSystemId
+          }
+        });
+      }
+      
+    } else if (msg.type === 'setActiveDesignSystem') {
+      // Set active design system
+      activeDesignSystemId = msg.payload.id;
+      await figma.clientStorage.setAsync('activeDesignSystemId', activeDesignSystemId);
+      
+      figma.ui.postMessage({
+        type: 'activeDesignSystemChanged',
+        payload: {
+          activeId: activeDesignSystemId
+        }
+      });
+      
+    } else if (msg.type === 'deleteDesignSystem') {
+      // Delete a design system
+      await deleteDesignSystem(msg.payload.id);
+      
+      // If deleted was active, clear active
+      if (activeDesignSystemId === msg.payload.id) {
+        activeDesignSystemId = null;
+        await figma.clientStorage.setAsync('activeDesignSystemId', null);
+      }
+      
+      // Send updated design systems to UI
+      const cachedSystems = await getCachedDesignSystems();
+      figma.ui.postMessage({
+        type: 'designSystemsLoaded',
+        payload: {
+          systems: cachedSystems,
+          activeId: activeDesignSystemId
+        }
+      });
+      
+    } else if (msg.type === 'checkDesignSystem') {
       // Show loading message
       figma.notify('Analyzing design system usage...', { timeout: 10000 });
       
+      // Check if scope is specified
+      const scope = msg.payload?.options?.scope || 'selection';
+      const scanHidden = msg.payload?.options?.includeHidden || false;
+      
       // Start the analysis
-      await runDesignSystemCheck(msg.payload?.options);
+      await runDesignSystemCheck(msg.payload?.options, scope, scanHidden);
       
     } else if (msg.type === 'highlightNode') {
       const nodeId = msg.payload.nodeId;
@@ -47,8 +131,8 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
     } else if (msg.type === 'applyFix') {
       await applyFix(msg.payload.fix);
       
-      // Re-run check after applying a fix
-      await runDesignSystemCheck();
+      // Re-run check after applying a fix - use current scope
+      await runDesignSystemCheck(undefined, 'current', false);
       
     } else if (msg.type === 'applyBatchFixes') {
       await applyBatchFixes(msg.payload.fixes);
@@ -62,6 +146,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
   } catch (error: any) {
     console.error("Error handling message:", error);
     figma.notify("An unexpected error occurred", { error: true });
+    
     // Send error to UI for display
     figma.ui.postMessage({
       type: "error",
@@ -70,30 +155,78 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
   }
 };
 
+// Get nodes based on scope
+function getNodesForScope(scope: string): SceneNode[] {
+  if (scope === 'selection' && figma.currentPage.selection.length > 0) {
+    return [...figma.currentPage.selection];
+  } else if (scope === 'page' || 
+            (scope === 'selection' && figma.currentPage.selection.length === 0)) {
+    return [...figma.currentPage.children];
+  } else if (scope === 'document') {
+    // Get all nodes from all pages (slower)
+    const allNodes: SceneNode[] = [];
+    for (const page of figma.root.children) {
+      allNodes.push(...page.children);
+    }
+    return allNodes;
+  }
+  
+  // Default to current page
+  return [...figma.currentPage.children];
+}
+
 // Run the design system check
-async function runDesignSystemCheck(options?: any): Promise<void> {
+async function runDesignSystemCheck(options?: any, scope: string = 'selection', scanHidden: boolean = false): Promise<void> {
   try {
-    // Get selected nodes or all nodes if nothing is selected
-    const nodes = getSelectedNodesOrAllNodes();
+    // Check if we have an active design system
+    let designSystem = null;
+    let designTokens = null;
+    
+    if (activeDesignSystemId) {
+      designSystem = await getDesignSystemById(activeDesignSystemId);
+      
+      if (designSystem) {
+        // Convert to format needed by checkers
+        designTokens = convertToDesignSystemTokens(designSystem);
+      } else {
+        // If no design system loaded, fallback to detecting tokens
+        designTokens = await detectDesignSystemTokens();
+      }
+    } else {
+      // If no design system loaded, fallback to detecting tokens
+      designTokens = await detectDesignSystemTokens();
+    }
+    
+    // Get nodes based on scope
+    const nodes = getNodesForScope(scope);
     
     // Show progress notification
-    figma.notify('Analyzing design system usage...', { timeout: 10000 });
+    figma.notify(`Analyzing design system usage (${scope} scope)...`, { timeout: 10000 });
     
-    // Detect design system libraries
-    const teamLibraries = await detectTeamLibraries();
-    const localLibraries = detectLocalStyleLibraries();
-    const allLibraries = [...teamLibraries, ...localLibraries];
+    // Detect local libraries
+    const localStyleLibraries = detectLocalStyleLibraries();
+    let allLibraries = [...localStyleLibraries];
     
-    // Get design system tokens
-    const designTokens = await detectDesignSystemTokens();
+    // Only detect team libraries if no design system is loaded or if explicitly requested
+    if (!designSystem || (options && options.includeTeamLibraries)) {
+      const teamLibraries = await detectTeamLibraries();
+      allLibraries = [...allLibraries, ...teamLibraries];
+    }
     
-    // For large files, process in batches
+    // For large files, process in batches with improved performance
     let processedNodes = 0;
     let totalNodes = 0;
     
-    // Count total nodes first
+    // Count total nodes first (but with a limit to avoid performance issues)
+    const nodeCountLimit = 1000;
     for (const node of nodes) {
-      totalNodes += countNodes(node);
+      totalNodes += countNodes(node, nodeCountLimit);
+      
+      // If we hit the limit, just use the limit as an estimate
+      if (totalNodes >= nodeCountLimit) {
+        totalNodes = nodeCountLimit;
+        break;
+      }
     }
     
     // Store all results
@@ -101,13 +234,34 @@ async function runDesignSystemCheck(options?: any): Promise<void> {
     const styleResults: StyleCheckResult[] = [];
     const tokenResults: TokenCheckResult[] = [];
     
-    // Process each node and its children in batches
+    // Process each node and its children in batches with a processing limit
+    const nodeBatchSize = BATCH_SIZE; // Process nodes in each batch
+    const startTime = Date.now();
+    
     for (const node of nodes) {
-      await processBatches(node, componentResults, styleResults, tokenResults, designTokens, BATCH_SIZE, (processed) => {
-        processedNodes += processed;
-        // Update progress
-        figma.notify(`Analyzing design system usage: ${Math.round((processedNodes / totalNodes) * 100)}%`, { timeout: 10000 });
-      });
+      await processBatches(
+        node, 
+        componentResults, 
+        styleResults, 
+        tokenResults, 
+        designTokens, 
+        nodeBatchSize, 
+        (processed) => {
+          processedNodes += processed;
+          // Update progress
+          const progressPercent = Math.min(100, Math.round((processedNodes / totalNodes) * 100));
+          figma.notify(`Analyzing design system usage: ${progressPercent}%`, { timeout: 10000 });
+        },
+        scanHidden,
+        startTime,
+        PROCESSING_TIME_LIMIT
+      );
+      
+      // Check if we've exceeded time limit
+      if (Date.now() - startTime > PROCESSING_TIME_LIMIT) {
+        figma.notify('Analysis stopped due to time limit - partial results shown', { timeout: 5000 });
+        break;
+      }
     }
     
     // Convert results to UI format
@@ -116,6 +270,23 @@ async function runDesignSystemCheck(options?: any): Promise<void> {
     
     // Calculate coverage metrics
     const metrics = calculateCoverage(nodes, componentResultsForUI, styleResultsForUI, tokenResults);
+    
+    // Update the coverage metrics with scope information
+    if (!metrics.scopeType) {
+      // Define these properties if they don't exist
+      Object.assign(metrics, {
+        scopeType: scope,
+        processingTime: Date.now() - startTime,
+        nodesProcessed: processedNodes,
+        totalNodesEstimate: totalNodes
+      });
+    } else {
+      // Update existing properties
+      metrics.scopeType = scope;
+      metrics.processingTime = Date.now() - startTime;
+      metrics.nodesProcessed = processedNodes;
+      metrics.totalNodesEstimate = totalNodes;
+    }
     
     // Visualize issues if enabled
     if (options?.visualize) {
@@ -147,7 +318,8 @@ async function runDesignSystemCheck(options?: any): Promise<void> {
         styleResults: styleResultsForUI,
         tokenResults,
         metrics,
-        libraries: allLibraries
+        libraries: allLibraries,
+        activeDesignSystem: designSystem
       } as CheckResults
     });
     
@@ -159,21 +331,27 @@ async function runDesignSystemCheck(options?: any): Promise<void> {
   }
 }
 
-// Count the total number of nodes in a node and its children
-function countNodes(node: SceneNode): number {
-  let count = 1; // Count this node
+// Count the total number of nodes in a node and its children, with limit
+function countNodes(node: SceneNode, limit: number, count: number = 0): number {
+  count += 1; // Count this node
   
-  // If node has children, count them too
+  // If we've reached the limit, return immediately
+  if (count >= limit) {
+    return count;
+  }
+  
+  // If node has children, count them too (up to the limit)
   if ('children' in node) {
     for (const child of node.children) {
-      count += countNodes(child);
+      count = countNodes(child as SceneNode, limit, count);
+      if (count >= limit) break;
     }
   }
   
   return count;
 }
 
-// Process nodes in batches to avoid UI freezing
+// Process nodes in batches to avoid UI freezing, with time limit
 async function processBatches(
   node: SceneNode, 
   componentResults: ComponentCheckResult[], 
@@ -181,7 +359,10 @@ async function processBatches(
   tokenResults: TokenCheckResult[],
   designTokens: any,
   batchSize: number,
-  progressCallback: (processed: number) => void
+  progressCallback: (processed: number) => void,
+  scanHidden: boolean,
+  startTime: number,
+  timeLimit: number
 ): Promise<void> {
   let nodesToProcess: SceneNode[] = [node];
   let processedInBatch = 0;
@@ -190,14 +371,27 @@ async function processBatches(
   while (nodesToProcess.length > 0) {
     const currentNode = nodesToProcess.shift()!;
     
+    // Skip hidden nodes if not scanning hidden
+    if (!scanHidden && !isNodeVisible(currentNode)) {
+      continue;
+    }
+    
     // Process the current node
-    await processNode(currentNode, componentResults, styleResults, tokenResults, designTokens);
+    processNode(currentNode, componentResults, styleResults, tokenResults, designTokens);
     processedInBatch++;
     totalProcessed++;
     
     // If node has children, add them to the list
     if ('children' in currentNode) {
       nodesToProcess = [...nodesToProcess, ...currentNode.children];
+    }
+    
+    // Check if we've exceeded time limit
+    if (Date.now() - startTime > timeLimit) {
+      if (processedInBatch > 0) {
+        progressCallback(processedInBatch);
+      }
+      return;
     }
     
     // If we've processed enough nodes in this batch, yield to the UI
@@ -224,18 +418,13 @@ function processNode(
   designTokens: any
 ): void {
   try {
-    // Skip processing if node is not visible
-    if (!isNodeVisible(node)) {
-      return;
-    }
-    
     // Check component usage
     if (node.type === 'INSTANCE') {
       const componentChecks = checkComponent(node);
       componentResults.push(...componentChecks);
     }
     
-    // Check style usage
+    // Check style usage - wrap in try/catch for each check to avoid failures
     try {
       const fillChecks = checkFills(node);
       styleResults.push(...fillChecks);
@@ -266,24 +455,21 @@ function processNode(
     
     // Check variable/token usage
     try {
-      const variableChecks = checkVariables(node, designTokens);
-      tokenResults.push(...variableChecks);
+      if (designTokens) {
+        const variableChecks = checkVariables(node, designTokens);
+        tokenResults.push(...variableChecks);
+      }
     } catch (error) {
       console.warn(`Error checking variables for ${node.name}:`, error);
     }
     
     try {
-      const missingVariableChecks = checkMissingVariables(node, designTokens);
-      tokenResults.push(...missingVariableChecks);
+      if (designTokens) {
+        const missingVariableChecks = checkMissingVariables(node, designTokens);
+        tokenResults.push(...missingVariableChecks);
+      }
     } catch (error) {
       console.warn(`Error checking missing variables for ${node.name}:`, error);
-    }
-    
-    // Recursively process children
-    if ('children' in node) {
-      for (const child of node.children) {
-        processNode(child as SceneNode, componentResults, styleResults, tokenResults, designTokens);
-      }
     }
   } catch (error) {
     console.warn(`Error processing node ${node.name}:`, error);
@@ -516,17 +702,26 @@ function exportCoverageReport(metrics: any): void {
 async function initPlugin(): Promise<void> {
   // Check which command was used
   if (figma.command === 'check-design-system') {
-    await runDesignSystemCheck({ visualize: true });
+    await runDesignSystemCheck({ visualize: true }, 'page', false);
   } else if (figma.command === 'configure-settings') {
     // Just keep the plugin open for settings configuration
   } else {
-    // Default behavior - run check without visualization
-    await runDesignSystemCheck();
+    // Default behavior - check for cached design systems
+    const cachedSystems = await getCachedDesignSystems();
+    const storedActiveId = await figma.clientStorage.getAsync('activeDesignSystemId');
+    
+    activeDesignSystemId = storedActiveId || null;
+    
+    // Send cached design systems to UI
+    figma.ui.postMessage({
+      type: 'designSystemsLoaded',
+      payload: {
+        systems: cachedSystems,
+        activeId: activeDesignSystemId
+      }
+    });
   }
 }
-
-// Start plugin
-initPlugin();
 
 // Convert component results to UI format
 function convertComponentResults(results: ComponentCheckResult[]): UIComponentCheckResult[] {
@@ -610,3 +805,6 @@ async function applyBatchFixes(fixes: Fix[]): Promise<void> {
     }
   });
 }
+
+// Start plugin
+initPlugin();

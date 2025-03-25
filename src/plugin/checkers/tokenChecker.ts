@@ -2,14 +2,19 @@ import { StyleSuggestion } from '../../shared/types';
 import { colorToHex, findClosestColor, isNodeVisible } from '../utils';
 import { TokenInfo, DesignSystemTokens, TokenCheckResult, TokenSuggestion } from '../../shared/types/tokens';
 
+// Using generic type to avoid direct dependency on Figma Variable type
+type FigmaVariable = any;
+type FigmaVariableCollection = any;
+
 // Function to detect all design system tokens in the file
 export function detectDesignSystemTokens(): DesignSystemTokens {
   const designSystemTokens: DesignSystemTokens = {
-    colorTokens: new Map(),
-    typographyTokens: new Map(),
-    spacingTokens: new Map(),
-    borderRadiusTokens: new Map(),
-    shadowTokens: new Map()
+    colorTokens: new Map<string, FigmaVariable>(),
+    typographyTokens: new Map<string, FigmaVariable>(),
+    spacingTokens: new Map<string, FigmaVariable>(),
+    borderRadiusTokens: new Map<string, FigmaVariable>(),
+    shadowTokens: new Map<string, FigmaVariable>(),
+    fontFamilies: []
   };
 
   // Get all variable collections
@@ -57,8 +62,71 @@ export function detectDesignSystemTokens(): DesignSystemTokens {
   return designSystemTokens;
 }
 
+// Function to handle design system tokens provided as arrays instead of Maps
+export function createDesignSystemTokens(tokenData: any): DesignSystemTokens {
+  // Create the Maps we need
+  const designSystemTokens: DesignSystemTokens = {
+    colorTokens: new Map<string, FigmaVariable>(),
+    typographyTokens: new Map<string, FigmaVariable>(),
+    spacingTokens: new Map<string, FigmaVariable>(),
+    borderRadiusTokens: new Map<string, FigmaVariable>(),
+    shadowTokens: new Map<string, FigmaVariable>(),
+    fontFamilies: tokenData.fontFamilies || []
+  };
+
+  // Helper to convert array to Map
+  const arrayToMap = (array: any[], keyField: string = 'id') => {
+    const map = new Map();
+    if (Array.isArray(array)) {
+      array.forEach(item => {
+        if (item && item[keyField]) {
+          map.set(item[keyField], item);
+        }
+      });
+    }
+    return map;
+  };
+
+  // Convert arrays to Maps if needed
+  if (tokenData) {
+    if (tokenData.colorTokens) {
+      designSystemTokens.colorTokens = Array.isArray(tokenData.colorTokens) 
+        ? arrayToMap(tokenData.colorTokens) 
+        : tokenData.colorTokens;
+    }
+    
+    if (tokenData.typographyTokens) {
+      designSystemTokens.typographyTokens = Array.isArray(tokenData.typographyTokens) 
+        ? arrayToMap(tokenData.typographyTokens) 
+        : tokenData.typographyTokens;
+    }
+    
+    if (tokenData.spacingTokens) {
+      designSystemTokens.spacingTokens = Array.isArray(tokenData.spacingTokens) 
+        ? arrayToMap(tokenData.spacingTokens) 
+        : tokenData.spacingTokens;
+    }
+    
+    if (tokenData.borderRadiusTokens) {
+      designSystemTokens.borderRadiusTokens = Array.isArray(tokenData.borderRadiusTokens) 
+        ? arrayToMap(tokenData.borderRadiusTokens) 
+        : tokenData.borderRadiusTokens;
+    }
+    
+    if (tokenData.shadowTokens) {
+      designSystemTokens.shadowTokens = Array.isArray(tokenData.shadowTokens) 
+        ? arrayToMap(tokenData.shadowTokens) 
+        : tokenData.shadowTokens;
+    }
+  }
+
+  return designSystemTokens;
+}
+
 // Check if a node is using variables
 export function checkVariables(node: SceneNode, designTokens: DesignSystemTokens): TokenCheckResult[] {
+  // Ensure design tokens is properly structured
+  const tokens = createDesignSystemTokens(designTokens);
   const results: TokenCheckResult[] = [];
   
   // Skip if node doesn't have boundVariables
@@ -83,13 +151,13 @@ export function checkVariables(node: SceneNode, designTokens: DesignSystemTokens
       // For array properties like fills, strokes
       if (Array.isArray(boundVars[prop])) {
         for (const binding of boundVars[prop]) {
-          checkVariableBinding(node, prop, binding.id, designTokens, results);
+          checkVariableBinding(node, prop, binding.id, tokens, results);
         }
       } 
       // For singular properties
       else {
         const binding = boundVars[prop];
-        checkVariableBinding(node, prop, binding.id, designTokens, results);
+        checkVariableBinding(node, prop, binding.id, tokens, results);
       }
     }
   }
@@ -154,7 +222,7 @@ function checkVariableBinding(
 }
 
 // Find alternative color tokens
-function findAlternativeColorTokens(color: RGB | RGBA, colorTokens: Map<string, Variable>): TokenSuggestion[] {
+function findAlternativeColorTokens(color: RGB | RGBA, colorTokens: Map<string, any>): TokenSuggestion[] {
   const suggestions: TokenSuggestion[] = [];
   const colorsList: Array<{id: string, color: RGBA, name: string}> = [];
   
@@ -194,12 +262,16 @@ function findAlternativeColorTokens(color: RGB | RGBA, colorTokens: Map<string, 
 }
 
 // Find alternative tokens by exact value match (for spacing, radius, etc.)
-function findAlternativeTokensByValue(value: number, tokenCollection: Map<string, Variable> | TokenInfo[]): TokenSuggestion[] {
+function findAlternativeTokensByValue(
+  value: number, 
+  tokenCollection: Map<string, any> | TokenInfo[]
+): TokenSuggestion[] {
   const suggestions: TokenSuggestion[] = [];
   
   // Return empty array if tokenCollection is null or empty
-  if (!tokenCollection || (tokenCollection instanceof Map && tokenCollection.size === 0) || 
-      (Array.isArray(tokenCollection) && tokenCollection.length === 0)) {
+  if (!tokenCollection || 
+     (tokenCollection instanceof Map && tokenCollection.size === 0) || 
+     (Array.isArray(tokenCollection) && tokenCollection.length === 0)) {
     return suggestions;
   }
   
@@ -240,6 +312,8 @@ function findAlternativeTokensByValue(value: number, tokenCollection: Map<string
 
 // Find nodes not using variables that should be
 export function checkMissingVariables(node: SceneNode, designTokens: DesignSystemTokens): TokenCheckResult[] {
+  // Ensure design tokens is properly structured
+  const tokens = createDesignSystemTokens(designTokens);
   const results: TokenCheckResult[] = [];
   
   // Skip if node is hidden or if we don't check this node type
@@ -249,22 +323,22 @@ export function checkMissingVariables(node: SceneNode, designTokens: DesignSyste
   
   // Check color usage
   if ('fills' in node && node.fills && typeof node.fills !== 'symbol') {
-    checkMissingColorVariables(node, designTokens, results, 'fills');
+    checkMissingColorVariables(node, tokens, results, 'fills');
   }
   
   if ('strokes' in node && node.strokes && typeof node.strokes !== 'symbol') {
-    checkMissingColorVariables(node, designTokens, results, 'strokes');
+    checkMissingColorVariables(node, tokens, results, 'strokes');
   }
   
   // Check radius usage
   if ('cornerRadius' in node && typeof node.cornerRadius === 'number' && node.cornerRadius > 0) {
-    checkMissingRadiusVariables(node, designTokens, results);
+    checkMissingRadiusVariables(node, tokens, results);
   }
   
   // Add spacing and layout token checks
   if ('itemSpacing' in node && typeof node.itemSpacing === 'number') {
     // Convert spacing tokens to array
-    const spacingTokenArray = convertVariableMapToTokenInfoArray(designTokens.spacingTokens);
+    const spacingTokenArray = convertVariableMapToTokenInfoArray(tokens.spacingTokens);
     
     // Check if the spacing matches a design token
     const suggestions = findAlternativeTokensByValue(node.itemSpacing, spacingTokenArray);
@@ -293,12 +367,12 @@ export function checkMissingVariables(node: SceneNode, designTokens: DesignSyste
   if ('paddingLeft' in node || 'paddingRight' in node || 
       'paddingTop' in node || 'paddingBottom' in node) {
       
-    checkPaddingVariables(node, designTokens, results);
+    checkPaddingVariables(node, tokens, results);
   }
   
   // Check for missing text variables
   if (node.type === 'TEXT') {
-    checkMissingTextVariables(node, designTokens, results);
+    checkMissingTextVariables(node, tokens, results);
   }
   
   return results;
@@ -544,7 +618,7 @@ function shouldCheckNodeType(nodeType: string): boolean {
 }
 
 // Add a helper function to convert Map to TokenInfo array
-function convertVariableMapToTokenInfoArray(variableMap: Map<string, Variable>): TokenInfo[] {
+function convertVariableMapToTokenInfoArray(variableMap: Map<string, any>): TokenInfo[] {
   const result: TokenInfo[] = [];
   
   if (!variableMap) {

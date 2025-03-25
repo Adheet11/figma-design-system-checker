@@ -1,0 +1,75 @@
+assets by status 69.1 KiB [cached] 3 assets
+orphan modules 72.6 KiB [orphan] 8 modules
+runtime modules 698 bytes 4 modules
+cacheable modules 147 KiB
+  modules by path ./node_modules/ 8.15 KiB
+    modules by path ./node_modules/style-loader/dist/runtime/*.js 5.84 KiB
+      ./node_modules/style-loader/dist/runtime/injectStylesIntoStyleTag.js 2.42 KiB [built] [code generated]
+      ./node_modules/style-loader/dist/runtime/styleDomAPI.js 1.5 KiB [built] [code generated]
+      + 4 modules
+    modules by path ./node_modules/css-loader/dist/runtime/*.js 2.31 KiB
+      ./node_modules/css-loader/dist/runtime/noSourceMaps.js 64 bytes [built] [code generated]
+      ./node_modules/css-loader/dist/runtime/api.js 2.25 KiB [built] [code generated]
+  modules by path ./src/ 138 KiB
+    ./src/plugin/code.ts + 7 modules 100 KiB [built] [code generated]
+    ./src/ui/ui.ts + 1 modules 29.8 KiB [built] [code generated]
+    ./node_modules/css-loader/dist/cjs.js!./src/ui/styles/main.css 8.47 KiB [built] [code generated]
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/designSystemLoader.ts
+./src/plugin/designSystemLoader.ts 30:46-72
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/designSystemLoader.ts(30,47)
+      TS2339: Property 'getAvailableLibrariesAsync' does not exist on type 'TeamLibraryAPI'.
+ @ ./src/plugin/code.ts 16:0-154 32:40-62 47:39-59 53:44-66 76:18-36 83:40-62 163:37-56 166:35-62 611:40-62
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/designSystemLoader.ts
+./src/plugin/designSystemLoader.ts 31:35-38
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/designSystemLoader.ts(31,36)
+      TS7006: Parameter 'lib' implicitly has an 'any' type.
+ @ ./src/plugin/code.ts 16:0-154 32:40-62 47:39-59 53:44-66 76:18-36 83:40-62 163:37-56 166:35-62 611:40-62
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/designSystemLoader.ts
+./src/plugin/designSystemLoader.ts 57:56-81
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/designSystemLoader.ts(57,57)
+      TS2339: Property 'getComponentMetadataAsync' does not exist on type 'TeamLibraryAPI'.
+ @ ./src/plugin/code.ts 16:0-154 32:40-62 47:39-59 53:44-66 76:18-36 83:40-62 163:37-56 166:35-62 611:40-62
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/designSystemLoader.ts
+./src/plugin/designSystemLoader.ts 72:52-73
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/designSystemLoader.ts(72,53)
+      TS2339: Property 'getStyleMetadataAsync' does not exist on type 'TeamLibraryAPI'.
+ @ ./src/plugin/code.ts 16:0-154 32:40-62 47:39-59 53:44-66 76:18-36 83:40-62 163:37-56 166:35-62 611:40-62
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/analyzers/libraryDetector.ts
+./src/plugin/analyzers/libraryDetector.ts 36:57-83
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/analyzers/libraryDetector.ts(36,58)
+      TS2339: Property 'getAvailableLibrariesAsync' does not exist on type 'TeamLibraryAPI'.
+ @ ./src/plugin/code.ts 15:0-93 182:40-65 186:44-63
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/analyzers/libraryDetector.ts
+./src/plugin/analyzers/libraryDetector.ts 71:56-81
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/analyzers/libraryDetector.ts(71,57)
+      TS2339: Property 'getComponentMetadataAsync' does not exist on type 'TeamLibraryAPI'.
+ @ ./src/plugin/code.ts 15:0-93 182:40-65 186:44-63
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/analyzers/libraryDetector.ts
+./src/plugin/analyzers/libraryDetector.ts 88:52-73
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/analyzers/libraryDetector.ts(88,53)
+      TS2339: Property 'getStyleMetadataAsync' does not exist on type 'TeamLibraryAPI'.
+ @ ./src/plugin/code.ts 15:0-93 182:40-65 186:44-63
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/analyzers/libraryDetector.ts
+./src/plugin/analyzers/libraryDetector.ts 181:42-66
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/analyzers/libraryDetector.ts(181,43)
+      TS2551: Property 'getVariablesByCollection' does not exist on type 'VariablesAPI'. Did you mean 'getVariableCollectionById'?
+ @ ./src/plugin/code.ts 15:0-93 182:40-65 186:44-63
+
+ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/checkers/tokenChecker.ts
+./src/plugin/checkers/tokenChecker.ts 28:40-64
+[tsl] ERROR in /Users/apatil/Documents/figma_plugin_2.0/src/plugin/checkers/tokenChecker.ts(28,41)
+      TS2551: Property 'getVariablesByCollection' does not exist on type 'VariablesAPI'. Did you mean 'getVariableCollectionById'?
+ @ ./src/plugin/code.ts 12:0-106 170:41-65 175:37-61 382:39-53 391:46-67
+
+9 errors have detailed information that is not shown.
+Use 'stats.errorDetails: true' resp. '--stats-error-details' to show it.
+
+webpack 5.98.0 compiled with 9 errors in 2096 ms

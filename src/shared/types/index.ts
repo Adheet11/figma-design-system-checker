@@ -1,6 +1,34 @@
 // Main types index file
 export * from './tokens';
 
+// Design Library types
+export interface DesignLibrary {
+  id: string;
+  key: string;
+  name: string;
+  type: string;
+}
+
+export interface StyleInfo {
+  id: string;
+  key: string;
+  name: string;
+  type: string;
+}
+
+export interface ComponentInfo {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface VariableInfo {
+  id: string;
+  name: string;
+  resolvedType: string;
+  collectionName?: string;
+}
+
 // Style check types
 export interface StyleCheckResult {
   node: {
